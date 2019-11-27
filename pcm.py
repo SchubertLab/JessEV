@@ -28,7 +28,7 @@ PCM_MATRIX = [
 def get_pcm_matrix():
     # scrambles the pcm matrix in the format used by the ilp
     return [
-        [0] + [amino_pcm[i] for i in [4, 5, 0, 1, 2, 3]]
+        [amino_pcm[i] for i in [4, 5, 0, 1, 2, 3]]
         for amino_pcm in PCM_MATRIX
     ]
 

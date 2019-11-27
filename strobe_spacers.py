@@ -30,7 +30,7 @@ class StrobeSpacer:
 
                  # matrix[i, j] = cleavage likelihood of aminoacid i in position j
                  # each row starts with the cleavages after the aminoacid, then the cleavages before
-                 # [p1', p2', p4, p3, p2, p1] makes indexing much nicer: r[-i] = pi and r[i] = pi'
+                 # [p1', p2', p4, p3, p2, p1]
                  pssm_matrix,
 
                  # list of all epitopes; each epitope is a list of indices of each amino acid
@@ -108,42 +108,63 @@ class StrobeSpacer:
 
     @staticmethod
     def compute_pre_junction_cleavage(model, spacer):
-        return sum(
-            # effect of previous epitope
+        ''' computes the cleavage score at the junction between
+            the given spacer and the previous epitope, i.e. cleavage
+            at the first aminoacid of the spacer
+        '''
+
+        # effect of previous epitope
+        prev_epitope = sum(
             model.x[epi, spacer] * sum(
                 model.PssmMatrix[model.EpitopeSequences[epi, model.EpitopeLength + j - 1], j]
                 for j in range(-4, 0)
-            ) +
+            )
+            for epi in model.Epitopes
+        )
 
-            # effect of next epitope
+        # effect of next epitope
+        next_epitope = sum(
             model.x[epi, spacer + 1] * sum(
                 model.PssmMatrix[model.EpitopeSequences[epi, j - model.SpacerLength], j]
                 for j in range(model.SpacerLength, 2)
             )
             for epi in model.Epitopes
-        ) + sum(
-            # effect of spacer
+        )
+
+        # effect of spacer
+        spacer_effect = sum(
             model.y[spacer, i, k] * model.PssmMatrix[k, i]
             for i in range(0, min(2, model.SpacerLength))
             for k in model.Aminoacids
         )
 
+        return prev_epitope + next_epitope + spacer_effect
+
     @staticmethod
     def compute_post_junction_cleavage(model, spacer):
-        return sum(
-            # effect of spacer
+        ''' computes the cleavage score at the junction between
+            the given spacer and the next epitope, i.e. cleavage
+            at the first aminoacid of next epitope
+        '''
+        # effect of spacer
+        spacer_effect = sum(
             model.y[spacer, model.SpacerLength - i - 1, k] * model.PssmMatrix[k, -i - 1]
             for i in range(0, min(4, model.SpacerLength))
             for k in model.Aminoacids
-        ) + sum(
-            # effect of next epitope
+        )
+        
+        # effect of next epitope
+        next_epitope = sum(
             model.x[epi, spacer + 1] * sum(
                 model.PssmMatrix[model.EpitopeSequences[epi, i], i]
                 for i in range(2)
             )
+            for epi in model.Epitopes
+        )
 
-            # effect of previous epitope
-            + model.x[epi, spacer] * sum(
+        # effect of previous epitope
+        prev_epitope = sum(
+            model.x[epi, spacer] * sum(
                 model.PssmMatrix[
                     model.EpitopeSequences[epi, model.EpitopeLength + model.SpacerLength - i - 1],
                     -i - 1
@@ -153,44 +174,58 @@ class StrobeSpacer:
             for epi in model.Epitopes
         )
 
-    @staticmethod
-    def compute_max_epitope_cleavage(model, pos):
-        return sum(  # effect of the inside of the epitope
-            model.x[epi, pos] * (
-                model.PssmMatrix[model.EpitopeSequences[epi, i + j], j] if 0 <= i + j < model.EpitopeLength else 0
-                for i in range(1, model.EpitopeLength)
-                for j in range(-4, 2)
-            )
-            for epi in model.Epitopes
-        ) + sum(
-            # effect of the previous spacer
-            model.y[pos - 1, model.SpacerLength - i - 1, k] * model.PssmMatrix[k, -i - 1]
-            for i in range(0, min(4, model.SpacerLength))
-            for k in model.Aminoacids
-        ) + sum(
-            # effect of the next spacer
-            model.y[pos, i, k] * model.PssmMatrix[k, i]
-            for i in range(0, min(2, model.SpacerLength))
-            for k in model.Aminoacids
-        ) + sum(
-            # effect of the previous epitope
-            sum(
-                model.x[epi, pos - 1] * model.PssmMatrix[
-                    model.EpitopeSequences[epi, model.EpitopeLength + model.SpacerLength - i - 1],
-                    -i - 1
-                ] if pos > 0 else 0
-                for i in range(model.SpacerLength, 4)
-            )
+        return spacer_effect + prev_epitope + next_epitope
 
-            # effect of the next epitope
-            + sum(
-                model.x[epi, pos + 1] * model.PssmMatrix[
-                    model.EpitopeSequences[epi, i - model.SpacerLength]
-                ] if pos < model.VaccineLength - 1 else 0
-                for i in range(model.SpacerLength, 2)
+    @staticmethod
+    def compute_cleavage_within_epitope(model, epi_pos, pos_in):
+        ''' computes the cleavage score *before* the amino acid at position
+            pos_in within the epitope at position epi_pos
+        '''
+        # effect of the inside of the epitope
+        inside = sum(
+            model.x[epi, epi_pos] * (
+                model.PssmMatrix[model.EpitopeSequences[epi, pos_in + j], j]
+                if 0 <= pos_in + j < model.EpitopeLength else 0
             )
             for epi in model.Epitopes
+            for j in range(-4, 2)
         )
+        
+        # effect of the previous spacer
+        prev_spacer = sum(
+            model.y[epi_pos - 1, model.SpacerLength - i - 1, k] * model.PssmMatrix[k, -i - pos_in - 1]
+            for i in range(0, min(model.SpacerLength, 4 - pos_in))
+            for k in model.Aminoacids
+        ) if epi_pos > 0 and pos_in < 4 else 0
+        
+        # effect of the next spacer
+        next_spacer = sum(
+            model.y[epi_pos, i, k] * model.PssmMatrix[k, i + model.EpitopeLength - pos_in]
+            for i in range(0, min(2 - model.EpitopeLength + pos_in, model.SpacerLength))
+            for k in model.Aminoacids
+        ) if epi_pos < model.VaccineLength and pos_in > model.EpitopeLength - 2 else 0
+        
+        # effect of the previous epitope
+        prev_epitope = sum(
+            model.x[epi, epi_pos - 1] * model.PssmMatrix[
+                model.EpitopeSequences[epi, model.EpitopeLength + model.SpacerLength + pos_in - i - 1],
+                -i - 1
+            ]
+            for i in range(model.SpacerLength + pos_in, 4)
+            for epi in model.Epitopes
+        ) if epi_pos > 0 and pos_in < 4 - model.SpacerLength  else 0
+
+        # effect of the next epitope
+        next_epitope = sum(
+            model.x[epi, epi_pos + 1] * model.PssmMatrix[
+                model.EpitopeSequences[epi, i - model.SpacerLength],
+                i
+            ]
+            for i in range(model.SpacerLength, 2)
+            for epi in model.Epitopes
+        ) if epi_pos < model.VaccineLength - 1 and pos_in > model.EpitopeLength + model.SpacerLength - 2 else 0
+
+        return inside + prev_spacer + next_spacer + prev_epitope + next_epitope
 
     def build_model(self):
         self._model = aml.ConcreteModel()
@@ -344,7 +379,7 @@ class StrobeSpacer:
         # enforce maximum epitope cleavage
         self._model.MaxEpitopeCleavageConstraint = aml.Constraint(
             self._model.EpitopePositions,
-            rule=lambda model, pos: self.compute_max_epitope_cleavage(model, pos) >= model.MaxEpitopeCleavage
+            rule=lambda model, pos: self.compute_cleavage_within_epitope(model, pos) >= model.MaxEpitopeCleavage
         )
 
         # store immunogenicity in a variable

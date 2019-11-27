@@ -39,6 +39,9 @@ class DummyModel:
         self.SpacerLength = spacer_length or 0
         self.Aminoacids = list(range(len(AMINOS)))
 
+        if self.x:
+            self.VaccineLength = max(pos for _, pos in self.x.keys())
+
 
 def get_x_for_epitopes(indices, num_epitopes):
     return {
@@ -57,83 +60,62 @@ def get_y_for_spacers(spacers):
     }
 
 
-def test_junction_cleavages():
-    epi1, spacer, epi2 = 'LPVGAANFR', 'AAY', 'AMRIGAEVY'
+def junction_cleavages(epi1, spacer, epi2):
     cleavages = position_cleavage(epi1 + spacer + epi2)
 
     model = DummyModel(
-        spacer_length=3,
+        spacer_length=len(spacer),
         epitopes = [epi1, epi2],
         x=get_x_for_epitopes([0, 1], 2),
         y=get_y_for_spacers([spacer]),
     )
 
     pre = StrobeSpacer.compute_pre_junction_cleavage(model, 0)
-    assert abs(pre - cleavages[9]) < 1e-12
+    assert abs(pre - cleavages[9]) < 0.01
 
     post = StrobeSpacer.compute_post_junction_cleavage(model, 0)
-    assert abs(post - cleavages[12]) < 1e-12
+    assert abs(post - cleavages[9 + len(spacer)]) < 0.01
 
 
-def test_max_epitope_cleavage():
-    epi1, spacer1, epi2, spacer2, epi3 = 'LPVGAANFR', 'AAY', 'AMRIGAEVY', 'NFW', 'QANGWGVMV'
+
+def cleavage_within_epitope(epi1, spacer1, epi2, spacer2, epi3):
     cleavages = position_cleavage(epi1 + spacer1 + epi2 + spacer2 + epi3)
 
     model = DummyModel(
-        spacer_length=3,
-        epitopes = [epi1, epi2],
-        x=get_x_for_epitopes([0, 1], 2),
+        spacer_length=len(spacer1),
+        epitopes=[epi1, epi2, epi3],
+        x=get_x_for_epitopes([0, 1, 2], 3),
         y=get_y_for_spacers([spacer1, spacer2]),
     )
 
-    first_actual = StrobeSpacer.compute_max_epitope_cleavage(model, 0) 
-    first_expected = max(cleavages[i] for i in range(9))
-    assert abs(first_actual - first_expected) < 1e-12
-
-    middle_actual = StrobeSpacer.compute_max_epitope_cleavage(model, 1)
-    middle_expected = max(cleavages[i] for i in range(13, 21))
-    assert abs(middle_actual - middle_expected) < 1e-12
-
-    last_actual = StrobeSpacer.compute_max_epitope_cleavage(model, 2)
-    last_expected = max(cleavages[i] for i in range(26, 33))
+    for epi in range(3):
+        for pos in range(9):
+            print('---')
+            print(epi, pos)
+            cleavage = StrobeSpacer.compute_cleavage_within_epitope(model, epi, pos)
+            expected = cleavages[epi * (9 + len(spacer1)) + pos]
+            assert abs(cleavage - expected) < 0.01
 
 
-# def test_spacers_oneaa():
-#     solver = StrobeSpacer(
-#         epitope_immunogen=[1, 1],
-#         epitope_cleavage_before=[10, 20],
-#         epitope_cleavage_after=[20, 10],
-#         spacer_length=2,
-#         num_epitopes=2,
-#         pcm_matrix=[
-#             [0, 1, 3, 5, 7, 11, 13],
-#         ]
-#     ).build_model()
-
-#     result = solver.solve()
-
-#     assert result.epitopes == [1, 0]
-#     assert result.spacers == [[0, 0]]
-#     assert result.immunogen == 2
-#     assert result.cleavage == -44
+def test_junction_cleavages_long_spacers():
+    junction_cleavages('LPVGAANFR', 'AAYAAY', 'AMRIGAEVY')
 
 
-# def test_spacers_twoaa():
-#     solver = StrobeSpacer(
-#         epitope_immunogen=[1, 1],
-#         epitope_cleavage_before=[10, 20],
-#         epitope_cleavage_after=[20, 10],
-#         spacer_length=2,
-#         num_epitopes=2,
-#         pcm_matrix=[
-#             [0, 1, 3, 5, 7, 11, 13],
-#             [0, -1, -3, -5, -7, -11, -13],
-#         ]
-#     ).build_model()
+def test_junction_cleavages_mid_spacers():
+    junction_cleavages('LPVGAANFR', 'AAYAAY', 'AMRIGAEVY')
 
-#     result = solver.solve()
 
-#     assert result.epitopes == [1, 0]
-#     assert result.spacers == [[1, 1]]
-#     assert result.immunogen == 2
-#     assert result.cleavage == 4
+def test_junction_cleavages_short_spacers():
+    junction_cleavages('LPVGAANFR', 'Y', 'AMRIGAEVY')
+
+
+def test_cleavage_within_epitope_lond_spacers():
+    cleavage_within_epitope('LPVGAANFR', 'AAYAAY', 'AMRIGAEVY', 'NFWNFW', 'QANGWGVMV')
+
+
+def test_cleavage_within_epitope_mid_spacers():
+    cleavage_within_epitope('LPVGAANFR', 'AAY', 'AMRIGAEVY', 'NFW', 'QANGWGVMV')
+
+
+def test_cleavage_within_epitope_short_spacers():
+    cleavage_within_epitope('LPVGAANFR', 'Y', 'AMRIGAEVY', 'W', 'QANGWGVMV')
