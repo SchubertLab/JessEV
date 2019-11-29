@@ -126,7 +126,8 @@ class StrobeSpacer:
         next_epitope = sum(
             model.x[epi, spacer + 1] * sum(
                 model.PssmMatrix[model.EpitopeSequences[epi, j - model.SpacerLength], j]
-                for j in range(model.SpacerLength, 2)
+                for j in range(2)
+                if j >= model.SpacerLength
             )
             for epi in model.Epitopes
         )
@@ -134,8 +135,9 @@ class StrobeSpacer:
         # effect of spacer
         spacer_effect = sum(
             model.y[spacer, i, k] * model.PssmMatrix[k, i]
-            for i in range(0, min(2, model.SpacerLength))
+            for i in range(0, 2)
             for k in model.Aminoacids
+            if i < model.SpacerLength
         )
 
         return prev_epitope + next_epitope + spacer_effect
@@ -149,8 +151,9 @@ class StrobeSpacer:
         # effect of spacer
         spacer_effect = sum(
             model.y[spacer, model.SpacerLength - i - 1, k] * model.PssmMatrix[k, -i - 1]
-            for i in range(0, min(4, model.SpacerLength))
+            for i in range(4)
             for k in model.Aminoacids
+            if i < model.SpacerLength
         )
         
         # effect of next epitope
@@ -169,7 +172,8 @@ class StrobeSpacer:
                     model.EpitopeSequences[epi, model.EpitopeLength + model.SpacerLength - i - 1],
                     -i - 1
                 ]
-                for i in range(model.SpacerLength, 4)
+                for i in range(4)
+                if i >= model.SpacerLength
             )
             for epi in model.Epitopes
         )
@@ -194,15 +198,17 @@ class StrobeSpacer:
         # effect of the previous spacer
         prev_spacer = sum(
             model.y[epi_pos - 1, model.SpacerLength - i - 1, k] * model.PssmMatrix[k, -i - pos_in - 1]
-            for i in range(0, min(model.SpacerLength, 4 - pos_in))
+            for i in range(4 - pos_in)
             for k in model.Aminoacids
+            if i < model.SpacerLength
         ) if epi_pos > 0 and pos_in < 4 else 0
         
         # effect of the next spacer
         next_spacer = sum(
             model.y[epi_pos, i, k] * model.PssmMatrix[k, i + model.EpitopeLength - pos_in]
-            for i in range(0, min(2 - model.EpitopeLength + pos_in, model.SpacerLength))
+            for i in model.AminoacidPositions
             for k in model.Aminoacids
+            if i < min(2 - model.EpitopeLength + pos_in, model.SpacerLength)
         ) if epi_pos < model.VaccineLength - 1 and pos_in > model.EpitopeLength - 2 else 0
         
         # effect of the previous epitope
@@ -211,8 +217,9 @@ class StrobeSpacer:
                 model.EpitopeSequences[epi, model.EpitopeLength + model.SpacerLength + pos_in - i - 1],
                 -i - 1
             ]
-            for i in range(model.SpacerLength + pos_in, 4)
+            for i in range(4)
             for epi in model.Epitopes
+            if i >= model.SpacerLength + pos_in
         ) if epi_pos > 0 and pos_in < 4 - model.SpacerLength  else 0
 
         # effect of the next epitope
@@ -221,8 +228,9 @@ class StrobeSpacer:
                 model.EpitopeSequences[epi, i - model.SpacerLength],
                 i
             ]
-            for i in range(model.SpacerLength, 2)
+            for i in range(2)
             for epi in model.Epitopes
+            if i >= model.SpacerLength
         ) if epi_pos < model.VaccineLength - 1 and pos_in > model.EpitopeLength + model.SpacerLength - 2 else 0
 
         return inside + prev_spacer + next_spacer + prev_epitope + next_epitope
@@ -312,7 +320,7 @@ class StrobeSpacer:
 
         # enforce maximum epitope cleavage
         self._model.MaxEpitopeCleavageConstraint = aml.Constraint(
-            self._model.EpitopePositions * self._model.PositionsInsideEpitope,
+            self._model.EpitopePositions * self._model.PositionInsideEpitope,
             rule=lambda model, epi, pos: self._compute_cleavage_within_epitope(model, epi, pos) <= model.MaxEpitopeCleavage
         )
 

@@ -50,9 +50,10 @@ def compute_epitopes_cleavage(epitopes, spacer_length):
                 ) for i in range(2) for j in range(4, 6 - i)
             )
         )
-    
+
     if len(good_epitopes) < len(epitopes):
-        print('WARN: discarded %d epitopes with invalid amino acids' % (len(epitopes) - len(good_epitopes)))
+        print('WARN: discarded %d epitopes with invalid amino acids' %
+              (len(epitopes) - len(good_epitopes)))
         if not good_epitopes:
             raise RuntimeError('all epitopes contain invalid aminoacids!')
     return good_epitopes, epi_idx, before, after
@@ -60,21 +61,27 @@ def compute_epitopes_cleavage(epitopes, spacer_length):
 
 def evaluate(seq, p1, p2):
     return sum(
-        PCM_MATRIX[AMINO_IDX[seq[p1 + i - 4]]][i] + PCM_MATRIX[AMINO_IDX[seq[p2 + i - 4]]][i]
+        PCM_MATRIX[AMINO_IDX[seq[p1 + i - 4]]][i] +
+        PCM_MATRIX[AMINO_IDX[seq[p2 + i - 4]]][i]
         for i in range(6)
     )
 
 
 @click.command()
 @click.argument('input-epitopes', type=click.Path())
-@click.argument('output-tradeoff', type=click.Path())
-@click.option('--spacer-length', '-l', default=3, help='Length of the spacer to be designed')
+@click.argument('output-vaccine', type=click.Path())
+@click.option('--spacer-length', '-s', default=3, help='Length of the spacer to be designed')
 @click.option('--num-epitopes', '-e', default=2, help='Number of epitopes in the vaccine')
 @click.option('--top-immunogen', help='Only consider the top epitopes by immunogenicity', type=float)
 @click.option('--top-proteins', help='Only consider the top epitopes by protein coverage', type=float)
 @click.option('--top-alleles', help='Only consider the top epitopes by allele coverage', type=float)
-def main(input_epitopes, output_tradeoff, spacer_length, num_epitopes, top_immunogen, top_alleles, top_proteins):
-    epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
+@click.option('--min-junction-cleavage', '-j', default=0.5, help='Minimum cleavage score at epitope-spacer junctions')
+@click.option('--max-epitope-cleavage', '-E', default=-0.5, help='Maximum cleavage score within epitopes')
+def main(input_epitopes, output_vaccine, spacer_length, num_epitopes, top_immunogen, top_alleles,
+         top_proteins, min_junction_cleavage, max_epitope_cleavage):
+
+    epitope_data = utilities.load_epitopes(
+        input_epitopes, top_immunogen, top_alleles, top_proteins)
     epitopes, epitopes_indicized, cleavages_before, cleavages_after = compute_epitopes_cleavage(
         epitope_data.keys(), spacer_length
     )
@@ -89,41 +96,33 @@ def main(input_epitopes, output_tradeoff, spacer_length, num_epitopes, top_immun
         pssm_matrix=get_pcm_matrix(),
         min_cleavage=None,
         all_epitopes=epitopes_indicized,
-        min_cleavage_gap=0.25,
+        min_pre_junction_cleavage=min_junction_cleavage,
+        min_post_junction_cleavage=min_junction_cleavage,
+        max_epitope_cleavage=max_epitope_cleavage
     ).build_model()
 
-    solver.set_objective(immunogen=True, cleavage=False)
-    result_immunog = solver.solve(tee=1)
-    print('Max immunogen %.3f at cleavage %.3f' % (result_immunog.immunogen, result_immunog.cleavage))
-    
-    solver.set_objective(immunogen=False, cleavage=True)
-    result_cleav = solver.solve(tee=0)
-    print('Max cleavage %.3f at immunogen %.3f' % (result_cleav.cleavage, result_cleav.immunogen))
-
-    with open(output_tradeoff, 'w') as f:
-        writer = csv.DictWriter(f, ('immunogen', 'cleavage', 'threshold', 'vaccine'))
+    with open(output_vaccine, 'w') as f:
+        writer = csv.DictWriter(
+            f, ('immunogen', 'cleavage', 'threshold', 'vaccine'))
         writer.writeheader()
 
-        for alpha in np.arange(0, 1.01, 0.05):
-            solver.set_max_cleavage(result_immunog.cleavage + alpha * (result_cleav.cleavage - result_immunog.cleavage))
-            solver.set_objective(immunogen=True, cleavage=True)
-            result = solver.solve(tee=0)
-            print('Immunogen %.3f at %.1f%% cleavage %.3f' % (result.immunogen, 100 * alpha, result.cleavage))
+        result = solver.solve(tee=0)
+        print('Immunogen %.3f at %.1f%% cleavage %.3f' % (result.immunogen, result.cleavage))
 
-            seq = []
-            for i in range(num_epitopes):
-                seq.append(epitopes[result.epitopes[i]])
-                if i < num_epitopes - 1:
-                    seq.append(''.join(AMINOS[j] for j in result.spacers[i]))
-            vax = ' '.join(seq)
-            print('   ', vax)
+        seq = []
+        for i in range(num_epitopes):
+            seq.append(epitopes[result.epitopes[i]])
+            if i < num_epitopes - 1:
+                seq.append(''.join(AMINOS[j] for j in result.spacers[i]))
+        vax = ' '.join(seq)
+        print('   ', vax)
 
-            writer.writerow({
-                'immunogen': result.immunogen,
-                'cleavage': result.cleavage,
-                'threshold': alpha,
-                'vaccine': vax,
-            })
+        writer.writerow({
+            'immunogen': result.immunogen,
+            'cleavage': result.cleavage,
+            'threshold': alpha,
+            'vaccine': vax,
+        })
 
 
 if __name__ == '__main__':
