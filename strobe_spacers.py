@@ -55,7 +55,7 @@ class StrobeSpacer:
         assert len(set(len(e) for e in all_epitopes)) == 1, 'only epitopes of the same length are supported'
 
         # not just because I am lazy, a scenario with both epitopes and spacers of one residue could give some headaches
-        assert len(all_epitopes[0]) > 4, 'only epitopes longer of four amino acids are supported'
+        assert len(all_epitopes[0]) > 4, 'only epitopes longer than four amino acids are supported'
         self._epitope_length = len(all_epitopes[0])
 
         assert all(len(r) == 6 for r in pssm_matrix)
@@ -66,7 +66,7 @@ class StrobeSpacer:
         self._max_epitope_cleavage = max_epitope_cleavage
 
     @staticmethod
-    def compute_cleavage_objective(model):
+    def _compute_cleavage_objective(model):
         return sum(
             # cleavage for each aminoacid of each spacer
             model.y[i, j, k] * (
@@ -107,7 +107,7 @@ class StrobeSpacer:
         )
 
     @staticmethod
-    def compute_pre_junction_cleavage(model, spacer):
+    def _compute_pre_junction_cleavage(model, spacer):
         ''' computes the cleavage score at the junction between
             the given spacer and the previous epitope, i.e. cleavage
             at the first aminoacid of the spacer
@@ -141,7 +141,7 @@ class StrobeSpacer:
         return prev_epitope + next_epitope + spacer_effect
 
     @staticmethod
-    def compute_post_junction_cleavage(model, spacer):
+    def _compute_post_junction_cleavage(model, spacer):
         ''' computes the cleavage score at the junction between
             the given spacer and the next epitope, i.e. cleavage
             at the first aminoacid of next epitope
@@ -177,7 +177,7 @@ class StrobeSpacer:
         return spacer_effect + prev_epitope + next_epitope
 
     @staticmethod
-    def compute_cleavage_within_epitope(model, epi_pos, pos_in):
+    def _compute_cleavage_within_epitope(model, epi_pos, pos_in):
         ''' computes the cleavage score *before* the amino acid at position
             pos_in within the epitope at position epi_pos
         '''
@@ -203,7 +203,7 @@ class StrobeSpacer:
             model.y[epi_pos, i, k] * model.PssmMatrix[k, i + model.EpitopeLength - pos_in]
             for i in range(0, min(2 - model.EpitopeLength + pos_in, model.SpacerLength))
             for k in model.Aminoacids
-        ) if epi_pos < model.VaccineLength and pos_in > model.EpitopeLength - 2 else 0
+        ) if epi_pos < model.VaccineLength - 1 and pos_in > model.EpitopeLength - 2 else 0
         
         # effect of the previous epitope
         prev_epitope = sum(
@@ -266,12 +266,6 @@ class StrobeSpacer:
         self._model.MinPostJunctionCleavage = aml.Param(initialize=self._min_post_junction_cleavage)
         self._model.MaxEpitopeCleavage = aml.Param(initialize=self._max_epitope_cleavage)
 
-        # a(ij) = 1 iff aminoacid j is in position i of the *whole* sequence (epitopes + spacers)
-        # self._model.a = aml.Var(self._model.SequencePositions * self._model.Aminoacids, domain=aml.Binary, initialize=0)
-
-        # c(i) is the computed immunogenicity at position i
-        # self._model.c = aml.Var(self._model.SequencePositions, domain=aml.Reals)
-
         # x(ij) = 1 iff epitope i is in position j
         self._model.x = aml.Var(self._model.Epitopes * self._model.EpitopePositions, domain=aml.Binary, initialize=0)
 
@@ -303,83 +297,23 @@ class StrobeSpacer:
             ) == 1
         )
 
-        # # fill in the sequence based on the chosen epitopes
-        # self._model.AssignSequenceFromEpitopes = aml.Constraint(
-        #     self._model.Epitopes * self._model.EpitopePositions * self._model.PositionInsideEpitope,
-        #     rule=lambda model, epitope, epi_pos, pos_inside_epi: model.a[
-        #         epi_pos * (model.EpitopeLength + model.SpacerLength) + pos_inside_epi,
-        #         model.EpitopeSequences[epitope, pos_inside_epi]
-        #     ] >= model.x[epitope, epi_pos]
-        # )
-
-        # # fill in the sequence based on the chosen spacers
-        # self._model.AssignSequenceFromSpacers = aml.Constraint(
-        #     self._model.SpacerPositions * self._model.AminoacidPositions * self._model.Aminoacids,
-        #     rule=lambda model, spacer_pos, pos_inside_spacer, amino: model.a[
-        #         (spacer_pos + 1) * (model.EpitopeLength + model.SpacerLength) - model.SpacerLength + pos_inside_spacer,
-        #         amino
-        #     ] >= model.y[spacer_pos, pos_inside_spacer, amino]
-        # )
-
-        # # ensure only one aminoacid is filled for each position
-        # self._model.UniqueSequence = aml.Constraint(
-        #     self._model.SequencePositions,
-        #     rule=lambda model, pos: sum(model.a[pos, k] for k in model.Aminoacids) <= 1
-        # )
-
-        # def assign_sequence_rule(model, seq_pos, amino):
-        #     segment = seq_pos // (model.EpitopeLength + model.SpacerLength)
-        #     offset = seq_pos % (model.EpitopeLength + model.SpacerLength)
-
-        #     if offset < model.EpitopeLength:
-        #         return model.a[seq_pos, amino] >= sum(
-        #             model.x[epi, segment] if model.EpitopeSequences[epi, offset] == amino else 0
-        #             for epi in model.Epitopes
-        #         )
-        #     else:
-        #         return model.a[seq_pos, amino] >= model.y[segment, offset - model.EpitopeLength, amino]
-
-        # self._model.AssignSequence = aml.Constraint(
-        #     self._model.SequencePositions * self._model.Aminoacids, rule=assign_sequence_rule
-        # )
-
-        # # compute cleavage for each position
-        # self._model.ComputeCleavage = aml.Constraint(
-        #     self._model.SequencePositions,
-        #     rule=lambda model, pos: sum(
-        #         model.a[pos - j, k] * model.PssmMatrix[k, j] if 0 <= pos - j < model.SequenceLength else 0
-        #         for j in range(-4, 2)
-        #         for k in model.Aminoacids
-        #     ) == model.c[pos]
-        # )
-
-        # # make sure cleavage at the C-terminal junction is larger than cleavage inside the epitope
-        # self._model.CleavageGap = aml.Constraint(
-        #     self._model.SpacerPositions * self._model.PositionInsideEpitope,
-        #     rule=lambda model, spacer, pos_inside_epitope: model.c[
-        #         (spacer + 1) * (model.EpitopeLength + model.SpacerLength) - 1
-        #     ] >= model.c[
-        #         (spacer + 1) * (model.EpitopeLength + model.SpacerLength) + pos_inside_epitope
-        #     ] + model.MinClevageGap
-        # )
-
         # enforce minimum pre-junctions cleavage
         self._model.MinPreJunctionCleavageConstraint = aml.Constraint(
             self._model.SpacerPositions,
-            rule=lambda model, spacer: self.compute_pre_junction_cleavage(model, spacer) >= model.MinPreJunctionCleavage
+            rule=lambda model, spacer: self._compute_pre_junction_cleavage(model, spacer) >= model.MinPreJunctionCleavage
         )
 
         # enforce minimum post-junction cleavage
         self._model.MinPostJunctionCleavageConstraint = aml.Constraint(
             self._model.SpacerPositions,
-            rule=lambda model, spacer: self.compute_post_junction_cleavage(
+            rule=lambda model, spacer: self._compute_post_junction_cleavage(
                 model, spacer) >= model.MinPostJunctionCleavage
         )
 
         # enforce maximum epitope cleavage
         self._model.MaxEpitopeCleavageConstraint = aml.Constraint(
-            self._model.EpitopePositions,
-            rule=lambda model, pos: self.compute_cleavage_within_epitope(model, pos) >= model.MaxEpitopeCleavage
+            self._model.EpitopePositions * self._model.PositionsInsideEpitope,
+            rule=lambda model, epi, pos: self._compute_cleavage_within_epitope(model, epi, pos) <= model.MaxEpitopeCleavage
         )
 
         # store immunogenicity in a variable
@@ -388,52 +322,12 @@ class StrobeSpacer:
             model.x[i, j] * model.EpitopeImmunogen[i] for i in model.Epitopes for j in model.EpitopePositions
         ))
 
-        # store total cleavage in a variable
-        self._model.Cleavage = aml.Var()
-        self._model.AssignCleavage = aml.Constraint(
-            rule=lambda model: model.Cleavage == self.compute_cleavage_objective
-        )
-
-        if self._min_cleavage is not None:
-            self._model.MaxCleavageConstraint = aml.Constraint(
-                rule=lambda model: model.Cleavage <= model.MaxCleavage
-            )
-            def objective_rule(model): return model.Immunogenicity
-        else:
-            def objective_rule(model): return model.Immunogenicity + model.Cleavage
-
-        self._model.Objective = aml.Objective(rule=objective_rule, sense=aml.maximize)
+        self._model.Objective = aml.Objective(rule=lambda model: model.Immunogenicity, sense=aml.maximize)
 
         self._solver = SolverFactory(self._solver_type)
         self._solver.set_instance(self._model)
 
         return self
-
-    def set_objective(self, immunogen, cleavage):
-        if immunogen and cleavage:
-            def rule(model): return model.Immunogenicity + model.Cleavage
-        elif immunogen:
-            def rule(model): return model.Immunogenicity
-        elif cleavage:
-            def rule(model): return model.Cleavage
-        else:
-            raise ValueError('at least one of immunogenicity and cleavage must be in the objective')
-
-        del self._model.Objective
-        self._model.Objective = aml.Objective(rule=rule, sense=aml.maximize)
-        self._solver.set_objective(self._model.Objective)
-
-    def set_max_cleavage(self, cleavage):
-        if hasattr(self._model, 'MaxCleavageConstraint'):
-            constr = self._model.MaxCleavageConstraint
-            self._solver.remove_constraint(constr)
-            del constr
-
-        if cleavage is not None:
-            self.set_objective(immunogen=True, cleavage=False)
-            self._model.MaxCleavage.set_value(cleavage)
-            self._model.MaxCleavageConstraint = pmo.constraint(expr=self._model.Cleavage <= self._model.MaxCleavage)
-            self._solver.add_constraint(self._model.MaxCleavageConstraint)
 
     def solve(self, options=None, tee=1):
         res = self._solver.solve(options=options or {}, tee=tee, save_results=False, report_timing=True)
@@ -441,26 +335,35 @@ class StrobeSpacer:
             raise RuntimeError('Could not solve problem - %s . Please check your settings' % res.Solution.status)
         self._solver.load_vars()
 
+        epitopes, spacers, sequence = self._read_solution_from_model(self._model)
+
+        return VaccineResult(epitopes, spacers, sequence, self._model.Immunogenicity.value, self._model.Cleavage.value)
+
+    @staticmethod
+    def _read_solution_from_model(model):
         epitopes = [
             j
-            for i in self._model.EpitopePositions
-            for j in self._model.Epitopes
-            if self._model.x[j, i].value > 0.9
+            for i in model.EpitopePositions
+            for j in model.Epitopes
+            if model.x[j, i].value > 0.9
         ]
 
         spacers = [
             [
                 k
-                for j in self._model.AminoacidPositions
-                for k in self._model.Aminoacids
-                if self._model.y[i, j, k].value > 0.9
+                for j in model.AminoacidPositions
+                for k in model.Aminoacids
+                if model.y[i, j, k].value > 0.9
             ]
-            for i in self._model.SpacerPositions
+            for i in model.SpacerPositions
         ]
 
-        sequence = [
-            [k for k in range(self._num_aminoacids) if self._model.a[i, k].value > 0.9][0]
-            for i in range(self._vaccine_length * (self._epitope_length + self._spacer_length) - self._spacer_length)
-        ]
+        sequence = []
+        for i, e in enumerate(epitopes):
+            for pos in range(model.EpitopeLength):
+                sequence.append(model.EpitopeSequences[e, pos].value)
 
-        return VaccineResult(epitopes, spacers, sequence, self._model.Immunogenicity.value, self._model.Cleavage.value)
+            if i < len(epitopes) - 1:
+                sequence.extend(spacers[i])
+        
+        return epitopes, spacers, sequence
