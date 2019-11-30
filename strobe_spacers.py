@@ -6,7 +6,7 @@ from pyomo.opt import SolverFactory, TerminationCondition
 from collections import namedtuple
 
 
-VaccineResult = namedtuple('VaccineResult', ['epitopes', 'spacers', 'sequence', 'immunogen', 'cleavage'])
+VaccineResult = namedtuple('VaccineResult', ['epitopes', 'spacers', 'sequence', 'immunogen'])
 
 
 class StrobeSpacer:
@@ -345,7 +345,7 @@ class StrobeSpacer:
 
         epitopes, spacers, sequence = self._read_solution_from_model(self._model)
 
-        return VaccineResult(epitopes, spacers, sequence, self._model.Immunogenicity.value, self._model.Cleavage.value)
+        return VaccineResult(epitopes, spacers, sequence, self._model.Immunogenicity.value)
 
     @staticmethod
     def _read_solution_from_model(model):
@@ -368,8 +368,8 @@ class StrobeSpacer:
 
         sequence = []
         for i, e in enumerate(epitopes):
-            for pos in range(model.EpitopeLength):
-                sequence.append(model.EpitopeSequences[e, pos].value)
+            for pos in range(model.EpitopeLength.value):
+                sequence.append(model.EpitopeSequences[e, pos])
 
             if i < len(epitopes) - 1:
                 sequence.extend(spacers[i])

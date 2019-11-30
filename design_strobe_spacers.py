@@ -1,5 +1,8 @@
 from __future__ import print_function, division
 
+import subprocess
+import json
+import datetime
 import numpy as np
 import csv
 from strobe_spacers import StrobeSpacer
@@ -67,6 +70,26 @@ def evaluate(seq, p1, p2):
     )
 
 
+def save_run_info(ctx):
+    try:
+        git_head = subprocess.check_output(['git', 'rev-parse', 'HEAD'])
+        git_head = str(git_head).strip()
+    except subprocess.CalledProcessError:
+        git_head = None
+
+    run_info = {
+        'datetime': datetime.datetime.utcnow().isoformat(),
+        'file': __file__,
+        'command': ctx.command.name,
+        'params': ctx.params,
+        'head': git_head,
+    }
+
+    with open('dev/experiment-history.jsonl', 'a') as f:
+        f.write(json.dumps(run_info))
+        f.write('\n')
+
+
 @click.command()
 @click.argument('input-epitopes', type=click.Path())
 @click.argument('output-vaccine', type=click.Path())
@@ -77,8 +100,11 @@ def evaluate(seq, p1, p2):
 @click.option('--top-alleles', help='Only consider the top epitopes by allele coverage', type=float)
 @click.option('--min-junction-cleavage', '-j', default=0.5, help='Minimum cleavage score at epitope-spacer junctions')
 @click.option('--max-epitope-cleavage', '-E', default=-0.5, help='Maximum cleavage score within epitopes')
-def main(input_epitopes, output_vaccine, spacer_length, num_epitopes, top_immunogen, top_alleles,
+@click.pass_context
+def main(ctx, input_epitopes, output_vaccine, spacer_length, num_epitopes, top_immunogen, top_alleles,
          top_proteins, min_junction_cleavage, max_epitope_cleavage):
+
+    save_run_info(ctx)
 
     epitope_data = utilities.load_epitopes(
         input_epitopes, top_immunogen, top_alleles, top_proteins)
@@ -103,11 +129,10 @@ def main(input_epitopes, output_vaccine, spacer_length, num_epitopes, top_immuno
 
     with open(output_vaccine, 'w') as f:
         writer = csv.DictWriter(
-            f, ('immunogen', 'cleavage', 'threshold', 'vaccine'))
+            f, ('immunogen', 'vaccine'))
         writer.writeheader()
 
-        result = solver.solve(tee=0)
-        print('Immunogen %.3f at %.1f%% cleavage %.3f' % (result.immunogen, result.cleavage))
+        result = solver.solve({'Threads': 7})
 
         seq = []
         for i in range(num_epitopes):
@@ -119,8 +144,6 @@ def main(input_epitopes, output_vaccine, spacer_length, num_epitopes, top_immuno
 
         writer.writerow({
             'immunogen': result.immunogen,
-            'cleavage': result.cleavage,
-            'threshold': alpha,
             'vaccine': vax,
         })
 
