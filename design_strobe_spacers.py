@@ -132,7 +132,7 @@ def main(ctx, input_epitopes, output_vaccine, spacer_length, num_epitopes, top_i
             f, ('immunogen', 'vaccine'))
         writer.writeheader()
 
-        result = solver.solve({'Threads': 7})
+        result = solver.solve()
 
         seq = []
         for i in range(num_epitopes):
