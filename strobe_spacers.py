@@ -130,8 +130,7 @@ class StrobeSpacer:
                                 domain=aml.Binary, initialize=0)
 
         # a(ij) = 1 iff aminoacid j is in position i of the *whole* sequence (epitopes + spacers)
-        self._model.a = aml.Var(self._model.SequencePositions *
-                                self._model.Aminoacids, domain=aml.Binary, initialize=0)
+        self._model.a = aml.Var(self._model.SequencePositions * self._model.Aminoacids, domain=aml.Binary, initialize=0)
 
         # c(i) indicates whether there is an aminoacid at position i
         self._model.c = aml.Var(
@@ -143,7 +142,7 @@ class StrobeSpacer:
         self._model.o = aml.Var(self._model.SequencePositions * self._model.SequencePositions * self._model.Aminoacids,
                                 bounds=(-sequence_length, sequence_length))
 
-        # p(ijk) has the content of the pssm matrix when the aminoacid in position i is k, and the offset is j
+        # p(ijk) has the content of the pssm matrix when the aminoacid in position i is k, and the offset is o[j]
         # or zero if j is out of bounds
         # p is assigned from o with a piecewise linear function, and for this to work they must have the same index
         # that is why we have to include the aminoacids in the indexing for o
@@ -152,8 +151,7 @@ class StrobeSpacer:
                                 bounds=(-10, 10))
 
         # i(i) is the computed immunogenicity at position i
-        self._model.i = aml.Var(
-            self._model.SequencePositions, domain=aml.Reals)
+        self._model.i = aml.Var(self._model.SequencePositions, domain=aml.Reals)
 
         # exactly one epitope per position
         self._model.OneEpitopePerPosition = aml.Constraint(
@@ -187,8 +185,7 @@ class StrobeSpacer:
 
             if offset < model.EpitopeLength:
                 return model.a[seq_pos, amino] >= sum(
-                    model.x[epi, segment] if model.EpitopeSequences[epi,
-                                                                    offset] == amino else 0
+                    model.x[epi, segment] if model.EpitopeSequences[epi, offset] == amino else 0
                     for epi in model.Epitopes
                 )
             else:
@@ -229,8 +226,8 @@ class StrobeSpacer:
         )
 
         # compute offsets
-        def offsets_rule(model, src, dst, amino):
-            # aminoacid at src is not counted, aminoacid at dst is counted
+        def offsets_rule(model, dst, src, amino):
+            # aminoacid at src is counted, aminoacid at dst is not counted
             if src < dst:
                 return model.o[dst, src, amino] == -sum(model.c[p] for p in range(src, dst))
             elif src > dst:
@@ -254,29 +251,38 @@ class StrobeSpacer:
             pw_pts=[-sequence_length, -5] + range(-4, 2) + [2, sequence_length],
             pw_constr_type='EQ',
             f_rule=index_rule,
-            warning_tol=-1.0, 
+            warning_tol=-1.0,
+        )
+
+        # b(ijk) = 1 if the aminoacid in position j is k and should be used to compute cleavage for position i
+        self._model.b = aml.Var(self._model.SequencePositions * self._model.SequencePositions * self._model.Aminoacids,
+                                domain=aml.Binary)
+        self._model.AssignB = aml.Constraint(
+            self._model.SequencePositions * self._model.SequencePositions * self._model.Aminoacids,
+            rule=lambda model, pos, i, k: model.b[pos, i, k] == sum(
+                model.a[i, k] * model.a[pos, l] for l in model.Aminoacids
+            )
         )
 
         # compute cleavage for each position
         self._model.ComputeCleavage = aml.Constraint(
             self._model.SequencePositions,
             rule=lambda model, pos: model.i[pos] == sum(
-                model.a[i, k] * model.p[pos, i, k]
+                model.b[pos, i, k] * model.p[pos, i, k]
                 for i in model.SequencePositions
                 for k in model.Aminoacids
             )
         )
 
-        # # make sure cleavage at the C-terminal junction is larger than cleavage inside the epitope
-        # self._model.CleavageGap = aml.Constraint(
-        #     self._model.SpacerPositions * self._model.PositionInsideEpitope,
-        #     rule=lambda model, spacer, pos_inside_epitope: model.i[
-        #         (spacer + 1) * (model.EpitopeLength + model.SpacerLength) - 1
-        #     ] >= model.i[
-        #         (spacer + 1) * (model.EpitopeLength +
-        #                         model.SpacerLength) + pos_inside_epitope
-        #     ] + model.MinCleavageGap
-        # )
+        # make sure cleavage at the C-terminal junction is larger than cleavage inside the epitope
+        self._model.CleavageGap = aml.Constraint(
+            self._model.SpacerPositions * self._model.PositionInsideEpitope,
+            rule=lambda model, spacer, pos_inside_epitope: model.i[
+                (spacer + 1) * (model.EpitopeLength + model.SpacerLength) - 1
+            ] >= model.i[
+                (spacer + 1) * (model.EpitopeLength + model.SpacerLength) + pos_inside_epitope
+            ] + model.MinCleavageGap
+        )
 
         # store immunogenicity in a variable
         self._model.Immunogenicity = aml.Var()
@@ -294,7 +300,7 @@ class StrobeSpacer:
 
     def solve(self, options=None, tee=1):
         res = self._solver.solve(
-            options=options or {'Threads': mp.cpu_count() - 1}, tee=tee, save_results=False, report_timing=True)
+            options=options or {'Threads': mp.cpu_count()}, tee=tee, save_results=False, report_timing=True)
         if res.solver.termination_condition != TerminationCondition.optimal:
             raise RuntimeError(
                 'Could not solve problem - %s . Please check your settings' % res.Solution.status)
