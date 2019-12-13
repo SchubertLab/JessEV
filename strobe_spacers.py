@@ -59,7 +59,7 @@ class StrobeSpacer:
 
     cleavage is based on a position-specific scoring matrix
     assumed of a fixed structure: one row per amino acid, and six columns, in order:
-    cleavage at position -4, -3, -2, -1, 0, 1
+    cleavage at relative position -4, -3, -2, -1, 0, 1
     '''
     _solver_type = 'gurobi_persistent'
 
@@ -292,7 +292,7 @@ class StrobeSpacer:
         self._model.AssignP = aml.Piecewise(
             self._model.SequencePositions * self._model.SequencePositions * self._model.Aminoacids,
             self._model.p, self._model.o,
-            pw_pts=[-sequence_length, -5] + range(-4, 2) + [2, sequence_length],
+            pw_pts=[-sequence_length, -5] + list(range(-4, 2)) + [2, sequence_length],
             pw_constr_type='EQ',
             pw_repn='MC',
             f_rule=index_rule,

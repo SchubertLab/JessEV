@@ -3,7 +3,6 @@ from __future__ import print_function, division
 import subprocess
 import json
 import datetime
-import numpy as np
 import csv
 from strobe_spacers import StrobeSpacer, MinimumCleavageGap
 import utilities

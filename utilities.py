@@ -113,8 +113,10 @@ def load_epitopes(epitopes_file, top_immunogen=None, top_alleles=None, top_prote
             row['alleles'] = set(row['alleles'].split(';'))
             epitope_data[row['epitope']] = row
 
-    if top_immunogen <= 0 and top_alleles <= 0 and top_proteins <= 0:
+    if top_immunogen is None and top_alleles is None and top_proteins is None:
         return epitope_data
+    elif top_immunogen <= 0 or top_alleles <= 0 or top_proteins <= 0:
+        raise ValueError('top immunogen/alleles/proteins need to be positive')
 
     def filter_epitopes(epitopes, top_count, top_key):
         assert top_count > 0

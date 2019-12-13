@@ -24,3 +24,7 @@ def test_all():
     assert solution.sequence == correct_sequence
     assert abs(solution.immunogen - 0.215) < 1e-6
     assert abs(sum(solution.cleavage) - sum(correct_cleavages)) < 1e-6
+
+
+if __name__ == '__main__':
+    test_all()
