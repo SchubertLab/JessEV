@@ -1,6 +1,6 @@
 from __future__ import division, print_function
 
-from abc import abstractmethod, ABCMeta
+from abc import abstractmethod, ABC
 import multiprocessing as mp
 import pyomo.environ as aml
 import pyomo.kernel as pmo
@@ -15,11 +15,9 @@ VaccineResult = namedtuple('VaccineResult', [
 ])
 
 
-class VaccineConstraints:
+class VaccineConstraints(ABC):
     ''' base class for adding constraints and/or objectives to the milp model
     '''
-
-    __metaclass__ = ABCMeta
 
     @abstractmethod
     def insert_constraints(self, model):
@@ -55,7 +53,7 @@ class MinimumCleavageGap(VaccineConstraints):
 
 class StrobeSpacer:
     '''
-    Joint optimization of string-of-beads vaccines with variable-length spacers 
+    Joint optimization of string-of-beads vaccines with variable-length spacers
 
     cleavage is based on a position-specific scoring matrix
     assumed of a fixed structure: one row per amino acid, and six columns, in order:
@@ -93,11 +91,19 @@ class StrobeSpacer:
             raise ValueError('only epitopes longer than four amino acids are supported')
 
         self._pcm = pcm or DoennesKohlbacherPcm()
-        self._epitope_immunogen = epitope_immunogen
         self._spacer_length = spacer_length
         self._vaccine_length = vaccine_length
-        self._all_epitopes = self._pcm.encode_sequences(all_epitopes)
-        self._epitope_length = len(all_epitopes[0])
+
+        self._all_epitopes, self._epitope_immunogen = [], []
+        for epi, imm in zip(all_epitopes, epitope_immunogen):
+            try:
+                self._all_epitopes.append([self._pcm.get_index(a) for a in epi])
+            except KeyError:
+                continue
+            else:
+                self._epitope_immunogen.append(imm)
+
+        self._epitope_length = len(self._all_epitopes[0])
         self._pcm_matrix = self._fetch_pcm_matrix()
         self._logger = logging.getLogger(self.__class__.__name__)
         self._vaccine_constraints = [vaccine_constraints] if not hasattr(
@@ -154,8 +160,7 @@ class StrobeSpacer:
         self._logger.debug('Building model variables...')
 
         # x(ij) = 1 iff epitope i is in position j
-        self._model.x = aml.Var(
-            self._model.Epitopes * self._model.EpitopePositions, domain=aml.Binary, initialize=0)
+        self._model.x = aml.Var(self._model.Epitopes * self._model.EpitopePositions, domain=aml.Binary, initialize=0)
 
         # y(ijk) = 1 iff aminoacid k is in position j of spacer i
         self._model.y = aml.Var(self._model.SpacerPositions * self._model.AminoacidPositions * self._model.Aminoacids,
@@ -165,29 +170,35 @@ class StrobeSpacer:
         self._model.a = aml.Var(self._model.SequencePositions * self._model.Aminoacids, domain=aml.Binary, initialize=0)
 
         # c(i) indicates whether there is an aminoacid at position i
-        self._model.c = aml.Var(
-            self._model.SequencePositions, domain=aml.Binary, initialize=0)
+        self._model.c = aml.Var(self._model.SequencePositions, domain=aml.Binary, initialize=0)
 
         # o(ij) counts how many aminoacids are selected between position i and position j
         # o(ij) < 0 <=> j < i and 0 when i = j. it counts the amino acid in position j, not the one in position i
-        # nb: we need to index on aminoacids too, read doc for p to know why
-        self._model.o = aml.Var(self._model.SequencePositions * self._model.SequencePositions * self._model.Aminoacids,
+        self._model.o = aml.Var(self._model.SequencePositions * self._model.SequencePositions,
                                 bounds=(-sequence_length, sequence_length))
+
+        # decision variables used to linearize access to the pcm matrix
+        # l(ijk) = 1 if o(ij)=k, d(jk)=1 if a(j)=k
+        # l0(ij) = 1 if o(ij) is out of bounds, similarly for d0(j)
+        self._model.l = aml.Var(self._model.SequencePositions * self._model.SequencePositions * self._model.PcmIdx,
+                                domain=aml.Binary)
+        self._model.l0 = aml.Var(self._model.SequencePositions * self._model.SequencePositions, domain=aml.Binary)
+        
+        # these variables are used to decide whether an offset is within the bounds of the pcm indices
+        # and to force the corresponding lambda variable to be 1
+        # d(ij) = 1 if o(ij) >= -4 and g(ij) = 1 if o(ij) < 2
+        self._model.d = aml.Var(self._model.SequencePositions * self._model.SequencePositions, domain=aml.Binary)
+        self._model.g = aml.Var(self._model.SequencePositions * self._model.SequencePositions, domain=aml.Binary)
 
         # p(ijk) has the content of the pssm matrix when the aminoacid in position i is k, and the offset is o[j]
         # or zero if j is out of bounds
-        # p is assigned from o with a piecewise linear function, and for this to work they must have the same index
-        # that is why we have to include the aminoacids in the indexing for o
-        self._model.p = aml.Var(
-            self._model.SequencePositions * self._model.SequencePositions * self._model.Aminoacids,
-            bounds=(
-                min(x for row in self._pcm_matrix for x in row),
-                max(x for row in self._pcm_matrix for x in row),
-            )
-        )
+        self._model.p = aml.Var(self._model.SequencePositions * self._model.SequencePositions, bounds=(
+            min(x for row in self._pcm_matrix for x in row),
+            max(x for row in self._pcm_matrix for x in row),
+        ))
 
-        # i(i) is the computed immunogenicity at position i
-        self._model.i = aml.Var(self._model.SequencePositions, domain=aml.Reals)
+        # i(i) is the computed cleavage at position i
+        self._model.i = aml.Var(self._model.SequencePositions, domain=aml.Reals, initialize=0)
 
         self._logger.debug('Building basic constraints...')
 
@@ -268,46 +279,64 @@ class StrobeSpacer:
         self._logger.debug('Building offset constraints...')
 
         # compute offsets
-        def offsets_rule(model, dst, src, amino):
+        def offsets_rule(model, dst, src):
             # aminoacid at src is counted, aminoacid at dst is not counted
             if src < dst:
-                return model.o[dst, src, amino] == -sum(model.c[p] for p in range(src, dst))
+                return model.o[dst, src] == -sum(model.c[p] for p in range(src, dst))
             elif src > dst:
-                return model.o[dst, src, amino] == sum(model.c[p] for p in range(dst + 1, src + 1))
+                return model.o[dst, src] == sum(model.c[p] for p in range(dst + 1, src + 1))
             else:
-                return model.o[dst, src, amino] == 0
+                return model.o[dst, src] == 0
 
         self._model.Offsets = aml.Constraint(
-            self._model.SequencePositions * self._model.SequencePositions * self._model.Aminoacids, rule=offsets_rule
+            self._model.SequencePositions * self._model.SequencePositions, rule=offsets_rule
         )
-
-        def index_rule(model, dst, src, amino, breakp):
-            if -4 <= breakp < 2:
-                return model.PssmMatrix[amino, breakp]
-            else:
-                return 0
 
         self._logger.debug('Building array access constraints...')
 
-        self._model.AssignP = aml.Piecewise(
-            self._model.SequencePositions * self._model.SequencePositions * self._model.Aminoacids,
-            self._model.p, self._model.o,
-            pw_pts=[-sequence_length, -5] + list(range(-4, 2)) + [2, sequence_length],
-            pw_constr_type='EQ',
-            pw_repn='MC',
-            f_rule=index_rule,
-            warning_tol=-1.0,
+        # set d = 1 when o >= -4
+        # FIXME why is there a 5 and not a 4 !?!
+        self._model.OffsetLowerBound = aml.Constraint(
+            self._model.SequencePositions * self._model.SequencePositions,
+            rule=lambda model, p1, p2: -5 >= model.o[p1, p2] - (sequence_length + 5) * model.d[p1, p2]
         )
 
-        self._logger.debug('Building cleavage position interactions constraints...')
+        # and set g = 1 when o <= 1
+        # FIXME why is there a 2 and not a 1 !?!
+        self._model.OffsetUpperBound = aml.Constraint(
+            self._model.SequencePositions * self._model.SequencePositions,
+            rule=lambda model, p1, p2: 2 <= model.o[p1, p2] + (sequence_length + 2) * model.g[p1, p2]
+        )
 
-        # b(ijk) = 1 if the aminoacid in position j is k and should be used to compute cleavage for position i
-        self._model.b = aml.Var(self._model.SequencePositions * self._model.SequencePositions * self._model.Aminoacids,
-                                domain=aml.Binary)
-        self._model.AssignB = aml.Constraint(
-            self._model.SequencePositions * self._model.SequencePositions * self._model.Aminoacids,
-            rule=lambda model, pos, i, k: model.b[pos, i, k] == sum(
-                model.a[i, k] * model.a[pos, l] for l in model.Aminoacids
+        # force the model to choose one lambda when d = g = 1
+        self._model.ChooseOneLambda = aml.Constraint(
+            self._model.SequencePositions * self._model.SequencePositions,
+            rule=lambda model, p1, p2: sum(
+                model.l[p1, p2, k] for k in model.PcmIdx
+            ) == model.d[p1, p2] * model.g[p1, p2]
+        )
+
+        # and to choose lambda0 when d = 0 or g = 0
+        self._model.LambdaOrLambdaZero = aml.Constraint(
+            self._model.SequencePositions * self._model.SequencePositions,
+            rule=lambda model, p1, p2: model.l0[p1, p2] == 1 - model.d[p1, p2] * model.g[p1, p2]
+        )
+
+        # now select the lambda corresponding to the offset if necessary
+        self._model.ReconstructOffset = aml.Constraint(
+            self._model.SequencePositions * self._model.SequencePositions,
+            rule=lambda model, p1, p2: sum(
+                model.l[p1, p2, i] * i for i in model.PcmIdx
+            ) + model.o[p1, p2] * model.l0[p1, p2] == model.o[p1, p2]
+        )
+
+        # read cleavage value from the pcm matrix
+        self._model.AssignP = aml.Constraint(
+            self._model.SequencePositions * self._model.SequencePositions,
+            rule=lambda model, p1, p2: model.p[p1, p2] == sum(
+                model.PssmMatrix[k, i] * model.a[p2, k] * model.l[p1, p2, i]
+                for i in model.PcmIdx
+                for k in model.Aminoacids
             )
         )
 
@@ -315,9 +344,7 @@ class StrobeSpacer:
         self._model.ComputeCleavage = aml.Constraint(
             self._model.SequencePositions,
             rule=lambda model, pos: model.i[pos] == sum(
-                model.b[pos, i, k] * model.p[pos, i, k]
-                for i in model.SequencePositions
-                for k in model.Aminoacids
+                model.p[pos, j] * model.c[pos] for j in model.SequencePositions
             )
         )
 
@@ -364,12 +391,12 @@ class StrobeSpacer:
         ]
 
         spacers = [
-            [
+            ''.join(
                 self._pcm.get_amino(k)
                 for j in self._model.AminoacidPositions
                 for k in self._model.Aminoacids
                 if aml.value(self._model.y[i, j, k]) > 0.9
-            ]
+            )
             for i in self._model.SpacerPositions
         ]
 
