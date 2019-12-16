@@ -16,7 +16,7 @@ VaccineResult = namedtuple('VaccineResult', [
 
 
 class VaccineConstraints(ABC):
-    ''' base class for adding constraints and/or objectives to the milp model
+    ''' base class for adding constraints to the milp model
     '''
 
     @abstractmethod
@@ -26,28 +26,88 @@ class VaccineConstraints(ABC):
         pass
 
 
-class MinimumCleavageGap(VaccineConstraints):
+class MinimumNTerminusCleavageGap(VaccineConstraints):
     ''' enforces a given minimum cleavage gap between the first position of an epitope
         (which indicates correct cleavage at the end of the preceding spacer)
-        and the following amino acids inside the epitope. does not apply to the first epitope
+        and the cleavage of surrounding amino acids (next and previous four)
     '''
 
-    # TODO in the future: consider the _preceding_ amino acids instead
-    # much harder since the spacer can have gaps...
     def __init__(self, min_gap):
-        self.min_gap = min_gap
+        self._min_gap = min_gap
+
+    @staticmethod
+    def _assign_mask(model, epi, pos):
+        if epi > 0:
+            epi_start = epi * (model.MaxSpacerLength + model.EpitopeLength)
+            return model.NTerminusMask[epi, pos] == model.d[epi_start, pos] * model.g[epi_start, pos]
+        else:
+            return aml.Constraint.Satisfied
+
+    @staticmethod
+    def _constraint_rule(model, epi, pos):
+        epi_start = epi * (model.MaxSpacerLength + model.EpitopeLength)
+        if epi > 0 and pos != epi_start:
+            # remove a large constant when c[pos] = 0 to satisfy the constraint
+            # when this position is empty
+            return (
+                model.i[epi_start] * model.NTerminusMask[epi, pos]
+            ) >= (
+                model.i[pos] + model.MinCleavageGap
+            ) * model.NTerminusMask[epi, pos] - 25 * (1 - model.c[pos])
+        else:
+            return aml.Constraint.Satisfied
 
     def insert_constraints(self, model):
-        model.MinCleavageGap = aml.Param(initialize=self.min_gap)
+        model.MinCleavageGap = aml.Param(initialize=self._min_gap)
+        model.NTerminusMask = aml.Var(
+            model.EpitopePositions * model.SequencePositions,
+            domain=aml.Binary, initialize=0
+        )
+        model.AssignNTerminusMask = aml.Constraint(
+            model.EpitopePositions * model.SequencePositions, rule=self._assign_mask
+        )
         model.MinCleavageGapConstraint = aml.Constraint(
-            model.EpitopePositions * model.PositionInsideEpitope,
-            rule=lambda model, epi, pos: (
-                model.i[
-                    epi * (model.SpacerLength + model.EpitopeLength)
-                ] >= model.i[
-                    epi * (model.SpacerLength + model.EpitopeLength) + pos
-                ] + model.MinCleavageGap
-            ) if epi > 0 and pos > 0 else aml.Constraint.Satisfied
+            model.EpitopePositions * model.SequencePositions, rule=self._constraint_rule
+        )
+
+
+class MinimumCleavageInsideSpacers(VaccineConstraints):
+    ''' enforces a given minimum cleavage likelihood inside every spacer
+    '''
+
+    def __init__(self, min_cleavage):
+        self._min_cleavage = min_cleavage
+
+    @staticmethod
+    def _constraint_rule(model, spacer, position):
+        # absolute position in the sequence
+        pos = (model.EpitopeLength + model.MaxSpacerLength) * spacer + position + model.EpitopeLength
+        return model.i[pos] >= model.MinCleavageInsideSpacers * model.c[pos]
+
+    def insert_constraints(self, model):
+        model.MinCleavageInsideSpacers = aml.Param(initialize=self._min_cleavage)
+        model.MinCleavageInsideSpacersConstraint = aml.Constraint(
+            model.SpacerPositions * model.AminoacidPositions,
+            rule=self._constraint_rule
+        )
+
+
+class MaximumCleavageInsideEpitopes(VaccineConstraints):
+    ''' enforces a given maximum cleavage inside the epitopes
+    '''
+
+    def __init__(self, max_cleavage):
+        self._max_cleavage = max_cleavage
+
+    @staticmethod
+    def _constraint_rule(model, epitope, offset):
+        pos = (model.EpitopeLength + model.MaxSpacerLength) * epitope + offset
+        return model.i[pos] <= model.MaxInnerEpitopeCleavage
+
+    def insert_constraints(self, model):
+        model.MaxInnerEpitopeCleavage = aml.Param(initialize=self._max_cleavage)
+        model.MaxInnerEpitopeCleavageConstraint = aml.Constraint(
+            model.EpitopePositions * model.PositionInsideEpitope, rule=self._constraint_rule
         )
 
 
@@ -70,8 +130,11 @@ class StrobeSpacer:
         # list of immunogenicities, one for each epitope
         epitope_immunogen,
 
+        # minimum length of the spacers
+        min_spacer_length,
+
         # maximum length of the spacers
-        spacer_length,
+        max_spacer_length,
 
         # number of epitopes in the vaccine
         vaccine_length,
@@ -83,15 +146,18 @@ class StrobeSpacer:
         pcm=None,
     ):
 
-        if spacer_length <= 0:
+        if max_spacer_length <= 0:
             raise ValueError('empty/negative maximum spacer length not supported')
         elif len(set(len(e) for e in all_epitopes)) != 1:
             raise ValueError('only epitopes of the same length are supported')
         elif len(all_epitopes[0]) <= 4:
             raise ValueError('only epitopes longer than four amino acids are supported')
+        elif min_spacer_length > max_spacer_length:
+            raise ValueError('minimum spacer length cannot be larger than the maximum spacer length')
 
         self._pcm = pcm or DoennesKohlbacherPcm()
-        self._spacer_length = spacer_length
+        self._min_spacer_length = min_spacer_length
+        self._max_spacer_length = max_spacer_length
         self._vaccine_length = vaccine_length
 
         self._all_epitopes, self._epitope_immunogen = [], []
@@ -133,16 +199,17 @@ class StrobeSpacer:
         self._model.Aminoacids = aml.RangeSet(0, len(self._pcm_matrix) - 1)
         self._model.EpitopePositions = aml.RangeSet(0, self._vaccine_length - 1)
         self._model.SpacerPositions = aml.RangeSet(0, self._vaccine_length - 2)
-        self._model.AminoacidPositions = aml.RangeSet(0, self._spacer_length - 1)
+        self._model.AminoacidPositions = aml.RangeSet(0, self._max_spacer_length - 1)
         self._model.PcmIdx = aml.RangeSet(-4, 1)
         sequence_length = (
             self._vaccine_length * self._epitope_length +
-            (self._vaccine_length - 1) * self._spacer_length - 1
+            (self._vaccine_length - 1) * self._max_spacer_length - 1
         )
         self._model.SequencePositions = aml.RangeSet(0, sequence_length)
         self._model.PositionInsideEpitope = aml.RangeSet(0, self._epitope_length - 1)
 
-        self._model.SpacerLength = aml.Param(initialize=self._spacer_length)
+        self._model.MinSpacerLength = aml.Param(initialize=self._min_spacer_length)
+        self._model.MaxSpacerLength = aml.Param(initialize=self._max_spacer_length)
         self._model.VaccineLength = aml.Param(initialize=self._vaccine_length)
         self._model.EpitopeLength = aml.Param(initialize=self._epitope_length)
         self._model.PssmMatrix = aml.Param(self._model.Aminoacids * self._model.PcmIdx,
@@ -154,7 +221,7 @@ class StrobeSpacer:
             initialize=lambda model, i, j: self._all_epitopes[i][j]
         )
         self._model.SequenceLength = aml.Param(
-            initialize=self._vaccine_length * (self._epitope_length + self._spacer_length) - self._spacer_length
+            initialize=self._vaccine_length * (self._epitope_length + self._max_spacer_length) - self._max_spacer_length
         )
 
         self._logger.debug('Building model variables...')
@@ -183,7 +250,7 @@ class StrobeSpacer:
         self._model.l = aml.Var(self._model.SequencePositions * self._model.SequencePositions * self._model.PcmIdx,
                                 domain=aml.Binary)
         self._model.l0 = aml.Var(self._model.SequencePositions * self._model.SequencePositions, domain=aml.Binary)
-        
+
         # these variables are used to decide whether an offset is within the bounds of the pcm indices
         # and to force the corresponding lambda variable to be 1
         # d(ij) = 1 if o(ij) >= -4 and g(ij) = 1 if o(ij) < 2
@@ -231,8 +298,8 @@ class StrobeSpacer:
         # fill in the sequence, in two steps
         # 1. ensure that a(ij) = 1 if aminoacid j is in position i
         def sequence_positive_rule(model, seq_pos, amino):
-            segment = seq_pos // (model.EpitopeLength + model.SpacerLength)
-            offset = seq_pos % (model.EpitopeLength + model.SpacerLength)
+            segment = seq_pos // (model.EpitopeLength + model.MaxSpacerLength)
+            offset = seq_pos % (model.EpitopeLength + model.MaxSpacerLength)
 
             if offset < model.EpitopeLength:
                 return model.a[seq_pos, amino] >= sum(
@@ -248,8 +315,8 @@ class StrobeSpacer:
 
         # 2. ensure that a(ij) = 0 if aminoacid j is not in position i
         def sequence_negative_rule(model, seq_pos):
-            segment = seq_pos // (model.EpitopeLength + model.SpacerLength)
-            offset = seq_pos % (model.EpitopeLength + model.SpacerLength)
+            segment = seq_pos // (model.EpitopeLength + model.MaxSpacerLength)
+            offset = seq_pos % (model.EpitopeLength + model.MaxSpacerLength)
 
             if offset < model.EpitopeLength:
                 return sum(
@@ -273,6 +340,14 @@ class StrobeSpacer:
         self._model.SequenceIndicators = aml.Constraint(
             self._model.SequencePositions, rule=lambda model, pos: model.c[pos] == sum(
                 model.a[pos, a] for a in model.Aminoacids
+            )
+        )
+
+        # enforce minimum spacer length
+        self._model.MinSpacerLengthConstraint = aml.Constraint(
+            self._model.SpacerPositions, rule=lambda model, spacer: model.MinSpacerLength <= sum(
+                model.c[(spacer + 1) * (model.EpitopeLength + model.MaxSpacerLength) - i]
+                for i in range(1, model.MaxSpacerLength + 1)
             )
         )
 
@@ -343,8 +418,8 @@ class StrobeSpacer:
         # compute cleavage for each position
         self._model.ComputeCleavage = aml.Constraint(
             self._model.SequencePositions,
-            rule=lambda model, pos: model.i[pos] == sum(
-                model.p[pos, j] * model.c[pos] for j in model.SequencePositions
+            rule=lambda model, pos: model.i[pos] == model.c[pos] * sum(
+                model.p[pos, j] for j in model.SequencePositions
             )
         )
 
@@ -375,7 +450,9 @@ class StrobeSpacer:
             self.build_model()
 
         res = self._solver.solve(
-            options=options or {'Threads': mp.cpu_count()}, tee=tee, save_results=False, report_timing=True)
+            options=options or {'Threads': mp.cpu_count()},
+            tee=tee, save_results=False, report_timing=True
+        )
         if res.solver.termination_condition != TerminationCondition.optimal:
             raise RuntimeError('Could not solve problem - %s . Please check your settings' % res.Solution.status)
         self._solver.load_vars()
@@ -409,6 +486,10 @@ class StrobeSpacer:
             ]
         )
 
-        cleavage = [aml.value(self._model.i[i]) for i in self._model.SequencePositions]
+        cleavage = [
+            aml.value(self._model.i[i])
+            for i in self._model.SequencePositions
+            if aml.value(self._model.c[i]) > 0.9
+        ]
 
         return VaccineResult(epitopes, spacers, sequence, aml.value(self._model.Immunogenicity), cleavage)

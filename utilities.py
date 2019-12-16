@@ -115,8 +115,10 @@ def load_epitopes(epitopes_file, top_immunogen=None, top_alleles=None, top_prote
 
     if top_immunogen is None and top_alleles is None and top_proteins is None:
         return epitope_data
-    elif top_immunogen <= 0 or top_alleles <= 0 or top_proteins <= 0:
-        raise ValueError('top immunogen/alleles/proteins need to be positive')
+    
+    top_immunogen = max(0, top_immunogen or 0)
+    top_alleles = max(0, top_alleles or 0)
+    top_proteins = max(0, top_proteins or 0)
 
     def filter_epitopes(epitopes, top_count, top_key):
         assert top_count > 0
