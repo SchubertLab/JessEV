@@ -16,6 +16,11 @@ VaccineResult = namedtuple('VaccineResult', [
 ])
 
 
+class SolverFailedException(Exception):
+    def __init__(self, condition):
+        self.condition = condition
+
+
 class VaccineConstraints(ABC):
     ''' base class for adding constraints to the milp model
     '''
@@ -482,7 +487,7 @@ class StrobeSpacer:
             tee=tee, save_results=False, report_timing=True
         )
         if res.solver.termination_condition != TerminationCondition.optimal:
-            raise RuntimeError('Could not solve problem - %s . Please check your settings' % res.Solution.status)
+            raise SolverFailedException(res.Solution.status)
         self._solver.load_vars()
 
         return self._read_solution_from_model()

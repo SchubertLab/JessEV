@@ -1,6 +1,8 @@
 from __future__ import print_function, division
 
 import subprocess
+import traceback
+import sys
 import pprint
 import json
 import datetime
@@ -14,7 +16,7 @@ import logging
 LOGGER = None
 
 
-def save_run_info(ctx):
+def save_run_info(ctx, result):
     try:
         git_head = subprocess.check_output(['git', 'rev-parse', 'HEAD'])
         git_head = str(git_head).strip()
@@ -27,6 +29,7 @@ def save_run_info(ctx):
         'command': ctx.command.name,
         'params': ctx.params,
         'head': git_head,
+        'result': result
     }
 
     LOGGER.debug('Run info:')
@@ -57,13 +60,28 @@ def save_run_info(ctx):
 @click.option('--log-file', type=click.Path(), help='Where to save the logs')
 @click.option('--verbose', is_flag=True, help='Print debug messages')
 @click.pass_context
-def main(ctx, input_epitopes, output_vaccine, max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
-         top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage, log_file, verbose):
-
+def main(ctx, **kwargs):
     global LOGGER
-    LOGGER = utilities.init_logging(verbose, log_file)
+    LOGGER = utilities.init_logging(kwargs.get('verbose', False), kwargs.get('log_file', None))
 
-    save_run_info(ctx)
+    try:
+        ret = design_strobe_spacers(**kwargs)
+        result = {'completed': True, 'result': ret}
+    except Exception as exc:
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        result = {
+            'completed': False,
+            'traceback': traceback.format_tb(exc_traceback),
+            'exception': traceback.format_exception_only(exc_type, exc_value),
+        }
+
+    save_run_info(ctx, result)
+
+
+def design_strobe_spacers(
+        input_epitopes, output_vaccine, max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
+        top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage, log_file, verbose
+    ):
 
     epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
     epitopes = list(epitope_data.keys())
@@ -86,7 +104,11 @@ def main(ctx, input_epitopes, output_vaccine, max_spacer_length, min_spacer_leng
         vaccine_constraints=constraints,
     ).build_model()
 
-    solution = problem.solve()
+    try:
+        solution = problem.solve()
+    except sspa.SolverFailedException as exc:
+        LOGGER.error('Could not solve the problem: %s', exc.condition)
+        return False, str(exc.condition)
 
     with open(output_vaccine, 'w') as f:
         writer = csv.DictWriter(f, ('immunogen', 'vaccine'))
@@ -96,8 +118,9 @@ def main(ctx, input_epitopes, output_vaccine, max_spacer_length, min_spacer_leng
             'immunogen': solution.immunogen,
             'vaccine': solution.sequence
         })
-    
+
     LOGGER.info('Saved to %s' % output_vaccine)
+    return True
 
 
 if __name__ == '__main__':
