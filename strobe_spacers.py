@@ -1,5 +1,6 @@
 from __future__ import division, print_function
 
+import sys
 from abc import abstractmethod, ABC
 import multiprocessing as mp
 import pyomo.environ as aml
@@ -440,12 +441,39 @@ class StrobeSpacer:
         self._solver = SolverFactory(self._solver_type)
         self._solver.set_instance(self._model)
 
-        self._built = False
+        self._built = True
         self._logger.info('Model built successfully!')
 
         return self
 
     def solve(self, options=None, tee=1):
+        # if logging is configured, gurobipy will print messages there *and* on stdout
+        # so we silence its logger and redirect all stdout to our own logger
+        logging.getLogger('gurobipy.gurobipy').disabled = True
+
+        class LoggingStdOut:
+            def __init__(self):
+                self.logger = logging.getLogger('stdout')
+
+            def write(self, message):
+                self.logger.debug(message.rstrip())
+
+            def flush(self, *args, **kwargs):
+                pass
+
+        sys.stdout = LoggingStdOut()
+
+        try:
+            return self._solve(options, tee)
+        except Exception:
+            # restore stdout so that handlers can print normally
+            # https://docs.python.org/3/library/sys.html#sys.__stdout__
+            sys.stdout = sys.__stdout__
+            raise
+        finally:
+            sys.stdout = sys.__stdout__
+
+    def _solve(self, options=None, tee=1):
         if not self._built:
             self.build_model()
 
