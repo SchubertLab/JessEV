@@ -117,6 +117,29 @@ class MaximumCleavageInsideEpitopes(VaccineConstraints):
         )
 
 
+class MinimumNTerminusCleavage(VaccineConstraints):
+    ''' enforces a given minimum cleavage at the first position of an epitope
+        (which indicates correct cleavage at the end of the preceding spacer)
+    '''
+
+    def __init__(self, min_cleavage):
+        self._min_cleavage = min_cleavage
+
+    def insert_constraints(self, model):
+        model.MinNtCleavage = aml.Param(initialize=self._min_cleavage)
+        model.MinNtCleavageConstraint = aml.Constraint(
+            model.EpitopePositions * model.SequencePositions, rule=self._constraint_rule
+        )
+
+    @staticmethod
+    def _constraint_rule(model, epi, pos):
+        epi_start = epi * (model.MaxSpacerLength + model.EpitopeLength)
+        if epi > 0 and pos != epi_start:
+            return model.i[epi_start] >= model.MinNtCleavage
+        else:
+            return aml.Constraint.Satisfied
+
+
 class StrobeSpacer:
     '''
     Joint optimization of string-of-beads vaccines with variable-length spacers

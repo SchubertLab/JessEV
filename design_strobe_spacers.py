@@ -50,6 +50,7 @@ def save_run_info(ctx, result):
 @click.option('--num-epitopes', '-e', default=2, help='Number of epitopes in the vaccine')
 # vaccine constraints
 @click.option('--min-nterminus-gap', '-g', help='Minimum cleavage gap', type=float)
+@click.option('--min-nterminus-cleavage', '-n', help='Minimum cleavage at the n-terminus', type=float)
 @click.option('--min-spacer-cleavage', '-c', help='Minimum cleavage gap', type=float)
 @click.option('--max-epitope-cleavage', '-E', help='Minimum cleavage gap', type=float)
 # epitope pre-selection
@@ -66,21 +67,21 @@ def main(ctx, **kwargs):
 
     try:
         ret = design_strobe_spacers(**kwargs)
-        result = {'completed': True, 'result': ret}
+        save_run_info(ctx, {'completed': True, 'result': ret})
     except Exception as exc:
         exc_type, exc_value, exc_traceback = sys.exc_info()
-        result = {
+        save_run_info(ctx, {
             'completed': False,
             'traceback': traceback.format_tb(exc_traceback),
             'exception': traceback.format_exception_only(exc_type, exc_value),
-        }
-
-    save_run_info(ctx, result)
+        })
+        raise
 
 
 def design_strobe_spacers(
         input_epitopes, output_vaccine, max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
-        top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage, log_file, verbose
+        top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage, log_file,
+        min_nterminus_cleavage, verbose
     ):
 
     epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
@@ -94,6 +95,8 @@ def design_strobe_spacers(
         constraints.append(sspa.MinimumCleavageInsideSpacers(min_spacer_cleavage))
     if max_epitope_cleavage is not None:
         constraints.append(sspa.MaximumCleavageInsideEpitopes(max_epitope_cleavage))
+    if min_nterminus_cleavage is not None:
+        constraints.append(sspa.MinimumNTerminusCleavage(min_nterminus_cleavage))
 
     problem = sspa.StrobeSpacer(
         all_epitopes=epitopes,
@@ -111,12 +114,14 @@ def design_strobe_spacers(
         return False, str(exc.condition)
 
     with open(output_vaccine, 'w') as f:
-        writer = csv.DictWriter(f, ('immunogen', 'vaccine'))
+        writer = csv.DictWriter(f, ('immunogen', 'vaccine', 'spacers', 'cleavage'))
         writer.writeheader()
 
         writer.writerow({
             'immunogen': solution.immunogen,
-            'vaccine': solution.sequence
+            'vaccine': solution.sequence,
+            'spacers': ';'.join(solution.spacers),
+            'cleavage': ';'.join('%.3f' % c for c in solution.cleavage)
         })
 
     LOGGER.info('Saved to %s' % output_vaccine)

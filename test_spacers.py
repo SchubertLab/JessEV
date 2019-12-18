@@ -1,20 +1,16 @@
-from strobe_spacers import StrobeSpacer, MinimumNTerminusCleavageGap, MinimumCleavageInsideSpacers, MaximumCleavageInsideEpitopes
+from strobe_spacers import StrobeSpacer, MinimumNTerminusCleavageGap, MinimumCleavageInsideSpacers, MaximumCleavageInsideEpitopes, MinimumNTerminusCleavage
 from pcm import DoennesKohlbacherPcm
 
 
 class BaseTest:
     epitopes = ['MGNKWSKSK', 'MGNKWSKSI', 'ARHHKAREL', 'SSNTEATNA', 'NNCLLHPMS']
     immunogens = [0.082, 0.100, 0.115, 0.047, 0.016]
+    min_spacer_length = 2
+    max_spacer_length = 4
+    vaccine_length = 2
 
     def __init__(self, constraints, correct_immunogen=None, correct_epitopes=None, correct_spacers=None):
-        self.problem = StrobeSpacer(
-            self.epitopes, self.immunogens,
-            min_spacer_length=2,
-            max_spacer_length=4,
-            vaccine_length=2,
-            vaccine_constraints=constraints,
-            pcm=DoennesKohlbacherPcm(),
-        )
+        self.constraints = constraints
         self._correct_epitopes = correct_epitopes
         self._correct_spacers = correct_spacers
         self._correct_immunogen = correct_immunogen
@@ -25,6 +21,15 @@ class BaseTest:
         return solution
 
     def solve(self):
+        self.problem = StrobeSpacer(
+            self.epitopes, self.immunogens,
+            min_spacer_length=self.min_spacer_length,
+            max_spacer_length=self.max_spacer_length,
+            vaccine_length=self.vaccine_length,
+            vaccine_constraints=self.constraints,
+            pcm=DoennesKohlbacherPcm(),
+        )
+
         self.solution = self.problem.solve()
         return self.solution
 
@@ -98,3 +103,17 @@ def test_max_cleavage_inside_epitope():
 
     assert all(solution.cleavage[pos] <= max_cleavage for pos in range(9))
     assert all(solution.cleavage[len(solution.cleavage) - pos] <= max_cleavage for pos in range(1, 10))
+
+
+def test_n_terminus_cleavage():
+    cleavage = 0.5
+    # there are several optimal solutions, so we only check the objective
+    test = BaseTest(
+        constraints=[MinimumNTerminusCleavage(cleavage)],
+        correct_immunogen=0.215,
+    )
+
+    solution = test.solve_and_check()
+
+    second_epitope_start = 9 + len(solution.spacers[0])
+    assert solution.cleavage[second_epitope_start] >= cleavage
