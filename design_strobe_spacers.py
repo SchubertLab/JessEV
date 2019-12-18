@@ -52,7 +52,8 @@ def save_run_info(ctx, result):
 @click.option('--min-nterminus-gap', '-g', help='Minimum cleavage gap', type=float)
 @click.option('--min-nterminus-cleavage', '-n', help='Minimum cleavage at the n-terminus', type=float)
 @click.option('--min-spacer-cleavage', '-c', help='Minimum cleavage gap', type=float)
-@click.option('--max-epitope-cleavage', '-E', help='Minimum cleavage gap', type=float)
+@click.option('--max-epitope-cleavage', '-E', help='Maximum cleavage inside epitopes', type=float)
+@click.option('--epitope-cleavage-ignore-first', '-i', help='Ignore first amino acids for epitope cleavage', type=int)
 # epitope pre-selection
 @click.option('--top-immunogen', help='Only consider the top epitopes by immunogenicity', type=float)
 @click.option('--top-proteins', help='Only consider the top epitopes by protein coverage', type=float)
@@ -81,7 +82,7 @@ def main(ctx, **kwargs):
 def design_strobe_spacers(
         input_epitopes, output_vaccine, max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
         top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage, log_file,
-        min_nterminus_cleavage, verbose
+        min_nterminus_cleavage, verbose, epitope_cleavage_ignore_first
     ):
 
     epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
@@ -94,7 +95,8 @@ def design_strobe_spacers(
     if min_spacer_cleavage is not None:
         constraints.append(sspa.MinimumCleavageInsideSpacers(min_spacer_cleavage))
     if max_epitope_cleavage is not None:
-        constraints.append(sspa.MaximumCleavageInsideEpitopes(max_epitope_cleavage))
+        constraints.append(sspa.MaximumCleavageInsideEpitopes(
+            max_epitope_cleavage, epitope_cleavage_ignore_first or 0))
     if min_nterminus_cleavage is not None:
         constraints.append(sspa.MinimumNTerminusCleavage(min_nterminus_cleavage))
 
@@ -124,7 +126,7 @@ def design_strobe_spacers(
             'cleavage': ';'.join('%.3f' % c for c in solution.cleavage)
         })
 
-    LOGGER.info('Saved to %s' % output_vaccine)
+    LOGGER.info('Saved to %s', output_vaccine)
     return True
 
 

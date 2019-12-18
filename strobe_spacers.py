@@ -100,15 +100,19 @@ class MinimumCleavageInsideSpacers(VaccineConstraints):
 
 class MaximumCleavageInsideEpitopes(VaccineConstraints):
     ''' enforces a given maximum cleavage inside the epitopes
+        possibly ignoring the first few amino acids
     '''
 
-    def __init__(self, max_cleavage):
+    def __init__(self, max_cleavage, ignore_first):
         self._max_cleavage = max_cleavage
+        self._ignore_first = ignore_first
 
-    @staticmethod
-    def _constraint_rule(model, epitope, offset):
-        pos = (model.EpitopeLength + model.MaxSpacerLength) * epitope + offset
-        return model.i[pos] <= model.MaxInnerEpitopeCleavage
+    def _constraint_rule(self, model, epitope, offset):
+        if offset >= self._ignore_first:
+            pos = (model.EpitopeLength + model.MaxSpacerLength) * epitope + offset
+            return model.i[pos] <= model.MaxInnerEpitopeCleavage
+        else:
+            return aml.Constraint.Satisfied
 
     def insert_constraints(self, model):
         model.MaxInnerEpitopeCleavage = aml.Param(initialize=self._max_cleavage)
