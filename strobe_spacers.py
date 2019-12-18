@@ -29,13 +29,12 @@ class VaccineConstraints(ABC):
     def insert_constraints(self, model):
         ''' simply modify the model as appropriate
         '''
-        pass
 
 
 class MinimumNTerminusCleavageGap(VaccineConstraints):
     ''' enforces a given minimum cleavage gap between the first position of an epitope
         (which indicates correct cleavage at the end of the preceding spacer)
-        and the cleavage of surrounding amino acids (next and previous four)
+        and the cleavage of surrounding amino acids (next one and previous four)
     '''
 
     def __init__(self, min_gap):
@@ -59,7 +58,7 @@ class MinimumNTerminusCleavageGap(VaccineConstraints):
                 model.i[epi_start] * model.NTerminusMask[epi, pos]
             ) >= (
                 model.i[pos] + model.MinCleavageGap
-            ) * model.NTerminusMask[epi, pos] - 25 * (1 - model.c[pos])
+            ) * model.NTerminusMask[epi, pos] - 50 * (1 - model.c[pos])
         else:
             return aml.Constraint.Satisfied
 
@@ -77,22 +76,40 @@ class MinimumNTerminusCleavageGap(VaccineConstraints):
         )
 
 
-class MinimumCleavageInsideSpacers(VaccineConstraints):
-    ''' enforces a given minimum cleavage likelihood inside every spacer
+class BoundCleavageInsideSpacers(VaccineConstraints):
+    ''' enforces a given minimum/maximum cleavage likelihood inside every spacer
+        use None to disable the corresponding constraint
     '''
 
-    def __init__(self, min_cleavage):
+    def __init__(self, min_cleavage, max_cleavage):
         self._min_cleavage = min_cleavage
+        self._max_cleavage = max_cleavage
 
-    @staticmethod
-    def _constraint_rule(model, spacer, position):
+    def _constraint_rule(self, model, spacer, position):
         # absolute position in the sequence
         pos = (model.EpitopeLength + model.MaxSpacerLength) * spacer + position + model.EpitopeLength
-        return model.i[pos] >= model.MinCleavageInsideSpacers * model.c[pos]
+
+        # I don't know why returning a tuple does not work
+        if self._min_cleavage is not None and self._max_cleavage is not None:
+            return (
+                model.MinSpacerCleavage * model.c[pos]
+                <= model.i[pos] <=
+                model.MaxSpacerCleavage * model.c[pos]
+            )
+        elif self._min_cleavage is not None:
+            return model.MinSpacerCleavage * model.c[pos] <= model.i[pos]
+        elif self._max_cleavage is not None:
+            return model.i[pos] <= model.MaxSpacerCleavage * model.c[pos]
+        else:
+            return aml.Constraint.Satisfied
 
     def insert_constraints(self, model):
-        model.MinCleavageInsideSpacers = aml.Param(initialize=self._min_cleavage)
-        model.MinCleavageInsideSpacersConstraint = aml.Constraint(
+        if self._min_cleavage is not None:
+            model.MinSpacerCleavage = aml.Param(initialize=self._min_cleavage)
+        if self._max_cleavage is not None:
+            model.MaxSpacerCleavage = aml.Param(initialize=self._max_cleavage)
+
+        model.BoundCleavageInsideSpacersConstraint = aml.Constraint(
             model.SpacerPositions * model.AminoacidPositions,
             rule=self._constraint_rule
         )
@@ -101,9 +118,18 @@ class MinimumCleavageInsideSpacers(VaccineConstraints):
 class MaximumCleavageInsideEpitopes(VaccineConstraints):
     ''' enforces a given maximum cleavage inside the epitopes
         possibly ignoring the first few amino acids
+
+        nb: if this constraint is used together with `MinimumNTerminusCleavage`,
+        you should ignore the first amino acid, as it corresponds to the
+        n-terminus. if you don't do that, the problem is infeasible as the two
+        constraints would contradict each other.
+
+        this is indeed the default behavior, as we are very interested in
+        cleavage at the n-terminus
+
     '''
 
-    def __init__(self, max_cleavage, ignore_first):
+    def __init__(self, max_cleavage, ignore_first=1):
         self._max_cleavage = max_cleavage
         self._ignore_first = ignore_first
 
@@ -124,6 +150,12 @@ class MaximumCleavageInsideEpitopes(VaccineConstraints):
 class MinimumNTerminusCleavage(VaccineConstraints):
     ''' enforces a given minimum cleavage at the first position of an epitope
         (which indicates correct cleavage at the end of the preceding spacer)
+
+        nb: if this constraint is used together with
+        `MaximumCleavageInsideEpitopes`, you should instruct that constraint to
+        ignore the first amino acid, as it corresponds to the n-terminus. if
+        you don't do that, the problem is infeasible as the two constraints
+        would contradict each other
     '''
 
     def __init__(self, min_cleavage):

@@ -51,7 +51,8 @@ def save_run_info(ctx, result):
 # vaccine constraints
 @click.option('--min-nterminus-gap', '-g', help='Minimum cleavage gap', type=float)
 @click.option('--min-nterminus-cleavage', '-n', help='Minimum cleavage at the n-terminus', type=float)
-@click.option('--min-spacer-cleavage', '-c', help='Minimum cleavage gap', type=float)
+@click.option('--min-spacer-cleavage', '-c', help='Minimum cleavage inside the spacers', type=float)
+@click.option('--max-spacer-cleavage', '-C', help='Maximum cleavage inside the spacers', type=float)
 @click.option('--max-epitope-cleavage', '-E', help='Maximum cleavage inside epitopes', type=float)
 @click.option('--epitope-cleavage-ignore-first', '-i', help='Ignore first amino acids for epitope cleavage', type=int)
 # epitope pre-selection
@@ -82,7 +83,7 @@ def main(ctx, **kwargs):
 def design_strobe_spacers(
         input_epitopes, output_vaccine, max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
         top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage, log_file,
-        min_nterminus_cleavage, verbose, epitope_cleavage_ignore_first
+        min_nterminus_cleavage, verbose, epitope_cleavage_ignore_first, max_spacer_cleavage
     ):
 
     epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
@@ -92,8 +93,8 @@ def design_strobe_spacers(
     constraints = []
     if min_nterminus_gap is not None:
         constraints.append(sspa.MinimumNTerminusCleavageGap(min_nterminus_gap))
-    if min_spacer_cleavage is not None:
-        constraints.append(sspa.MinimumCleavageInsideSpacers(min_spacer_cleavage))
+    if min_spacer_cleavage is not None or max_spacer_cleavage is not None:
+        constraints.append(sspa.MinimumCleavageInsideSpacers(min_spacer_cleavage, max_spacer_cleavage))
     if max_epitope_cleavage is not None:
         constraints.append(sspa.MaximumCleavageInsideEpitopes(
             max_epitope_cleavage, epitope_cleavage_ignore_first or 0))

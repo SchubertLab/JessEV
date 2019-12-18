@@ -1,4 +1,4 @@
-from strobe_spacers import StrobeSpacer, MinimumNTerminusCleavageGap, MinimumCleavageInsideSpacers, MaximumCleavageInsideEpitopes, MinimumNTerminusCleavage
+import strobe_spacers as sspa
 from pcm import DoennesKohlbacherPcm
 
 
@@ -21,7 +21,7 @@ class BaseTest:
         return solution
 
     def solve(self):
-        self.problem = StrobeSpacer(
+        self.problem = sspa.StrobeSpacer(
             self.epitopes, self.immunogens,
             min_spacer_length=self.min_spacer_length,
             max_spacer_length=self.max_spacer_length,
@@ -61,7 +61,7 @@ def test_n_terminus_cleavage_gap():
     gap = 0.5
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[MinimumNTerminusCleavageGap(gap)],
+        constraints=[sspa.MinimumNTerminusCleavageGap(gap)],
         correct_immunogen=0.215,
     )
 
@@ -78,7 +78,7 @@ def test_min_cleavage_inside_spacers():
     min_cleavage = 0.5
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[MinimumCleavageInsideSpacers(min_cleavage)],
+        constraints=[sspa.BoundCleavageInsideSpacers(min_cleavage, None)],
         correct_immunogen=0.215,
     )
 
@@ -90,10 +90,25 @@ def test_min_cleavage_inside_spacers():
     )
 
 
+def test_max_cleavage_inside_spacers():
+    max_cleavage = 0.2
+    # there are several optimal solutions, so we only check the objective
+    test = BaseTest(
+        constraints=[sspa.BoundCleavageInsideSpacers(None, max_cleavage)],
+    )
+
+    solution = test.solve_and_check()
+
+    assert all(
+        solution.cleavage[9 + pos] <= max_cleavage
+        for pos in range(len(solution.spacers[0]))
+    )
+
+
 def test_max_cleavage_inside_epitope():
     max_cleavage = 0.8
     test = BaseTest(
-        constraints=[MaximumCleavageInsideEpitopes(max_cleavage)],
+        constraints=[sspa.MaximumCleavageInsideEpitopes(max_cleavage)],
         correct_immunogen=0.162,
         correct_epitopes=[3, 2],
         correct_spacers=['CCC']
@@ -109,7 +124,7 @@ def test_n_terminus_cleavage():
     cleavage = 0.5
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[MinimumNTerminusCleavage(cleavage)],
+        constraints=[sspa.MinimumNTerminusCleavage(cleavage)],
         correct_immunogen=0.215,
     )
 
@@ -117,3 +132,4 @@ def test_n_terminus_cleavage():
 
     second_epitope_start = 9 + len(solution.spacers[0])
     assert solution.cleavage[second_epitope_start] >= cleavage
+
