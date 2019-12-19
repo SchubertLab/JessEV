@@ -94,7 +94,7 @@ def design_strobe_spacers(
     if min_nterminus_gap is not None:
         constraints.append(sspa.MinimumNTerminusCleavageGap(min_nterminus_gap))
     if min_spacer_cleavage is not None or max_spacer_cleavage is not None:
-        constraints.append(sspa.MinimumCleavageInsideSpacers(min_spacer_cleavage, max_spacer_cleavage))
+        constraints.append(sspa.BoundCleavageInsideSpacers(min_spacer_cleavage, max_spacer_cleavage))
     if max_epitope_cleavage is not None:
         constraints.append(sspa.MaximumCleavageInsideEpitopes(
             max_epitope_cleavage, epitope_cleavage_ignore_first or 0))
