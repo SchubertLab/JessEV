@@ -11,19 +11,19 @@ import csv
 class Trie:
     def __init__(self):
         self.children = {}
-    
+
     def _get_child(self, letter, create=True):
         if create and self.children.get(letter) is None:
             self.children[letter] = Trie()
         return self.children.get(letter)
-    
+
     def insert(self, string, pos_in_string=0):
         if pos_in_string >= len(string):
             return
-        
+
         child = self._get_child(string[pos_in_string], create=True)
         child.insert(string, pos_in_string + 1)
-    
+
     def reachable_strings(self, string, mistakes_allowed, pos_in_string=0, mistakes_done=0):
         ''' yields all strings in the trie that can be reached from the given strings
             by changing at most `mistakes_allowed` characters, and the number of characters changed
@@ -34,7 +34,7 @@ class Trie:
         if pos_in_string >= len(string):
             yield ''.join(string), mistakes_done
             return
-        
+
         if mistakes_allowed - mistakes_done <= 0:
             child = self._get_child(string[pos_in_string], create=False)
             if child is not None:
@@ -59,30 +59,50 @@ class Trie:
                     string[pos_in_string] = correct
 
 
+def compute_allele_coverage(epitope_data):
+    ''' compute allele coverage matrix
+    '''
+    alleles = [''] + list(set(a for e in epitope_data for a in e['alleles']))
+    return [
+        [int(a in e['alleles']) for a in alleles]
+        for e in epitope_data
+    ]
+
+
+def compute_protein_coverage(epitope_data):
+    ''' compute protein coverage matrix
+    '''
+    proteins = [''] + list(set(p for e in epitope_data for p in e['proteins']))
+    return [
+        [int(p in e['proteins']) for p in proteins]
+        for e in epitope_data
+    ]
+
+
 def compute_coverage_matrix(epitope_data, min_alleles, min_proteins,
                             min_prot_conservation, min_alle_conservation,
                             num_proteins, num_alleles):
     def make_absolute_and_append(value, maxval, lst):
         lst.append(int(value) if value > 1 else int(value * maxval))
 
-    # compute allele coverage matrix
     type_coverage, min_type_coverage, min_type_conservation = [], [], []
+
+    # allele coverage
     if min_alleles > 0 or min_alle_conservation > 0:
-        alleles = [''] + list(set(a for e in epitope_data for a in e['alleles']))
-        type_coverage.append(np.array([[0] * len(alleles)] + [
-            [int(a in e['alleles']) for a in alleles]
-            for e in epitope_data
-        ]))
+        allele_coverage = compute_allele_coverage(epitope_data)
+        type_coverage.append(np.array(
+            [0] * len(allele_coverage[0]) + allele_coverage
+        ))
+
         make_absolute_and_append(min_alleles, num_alleles, min_type_coverage)
         make_absolute_and_append(min_alle_conservation, num_alleles, min_type_conservation)
 
-    # compute protein coverage matrix
+    # protein coverage
     if min_proteins > 0 or min_prot_conservation > 0:
-        proteins = [''] + list(set(p for e in epitope_data for p in e['proteins']))
-        type_coverage.append(np.array([[0] * len(proteins)] + [
-            [int(p in e['proteins']) for p in proteins]
-            for e in epitope_data
-        ]))
+        protein_coverage = compute_protein_coverage(epitope_data)
+        type_coverage.append(np.array(
+            [[0] * len(protein_coverage[0])] + protein_coverage
+        ))
         make_absolute_and_append(min_proteins, num_proteins, min_type_coverage)
         make_absolute_and_append(min_prot_conservation, num_proteins, min_type_conservation)
 
@@ -115,7 +135,7 @@ def load_epitopes(epitopes_file, top_immunogen=None, top_alleles=None, top_prote
 
     if top_immunogen is None and top_alleles is None and top_proteins is None:
         return epitope_data
-    
+
     top_immunogen = max(0, top_immunogen or 0)
     top_alleles = max(0, top_alleles or 0)
     top_proteins = max(0, top_proteins or 0)
@@ -133,7 +153,7 @@ def load_epitopes(epitopes_file, top_immunogen=None, top_alleles=None, top_prote
         top_epitopes.update(filter_epitopes(epitope_data, top_alleles, lambda e: len(e['alleles'])))
     if top_proteins > 0:
         top_epitopes.update(filter_epitopes(epitope_data, top_proteins, lambda e: len(e['proteins'])))
-    
+
     return {e: epitope_data[e] for e in top_epitopes}
 
 
@@ -248,13 +268,13 @@ def parallel_apply(apply_fn, task_generator, processes, preload=64, timeout=9999
         for task in itake(task_generator, preload):
             tasks.append(pool.apply_async(apply_fn, task))
             task_count += 1
-        
+
         cursor = 0
         while processed_count < task_count:
             result = tasks[cursor].get(timeout)
             yield result
             tasks[cursor] = None
-            
+
             processed_count += 1
             cursor += 1
             next_task = itake(task_generator, 1)

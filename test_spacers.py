@@ -133,3 +133,39 @@ def test_n_terminus_cleavage():
     second_epitope_start = 9 + len(solution.spacers[0])
     assert solution.cleavage[second_epitope_start] >= cleavage
 
+
+def test_coverage():
+    # the only way to cover three options is to select the first and last epitopes
+    epitope_coverage = [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 1, 0],
+        [0, 1, 0],
+        [0, 1, 1],
+    ]
+    test = BaseTest(
+        constraints=[sspa.MinimumCoverageAverageConservation(
+            epitope_coverage, min_coverage=3
+        )]
+    )
+    solution = test.solve_and_check()
+    assert set(solution.epitopes) == set([0, 4])
+
+
+def test_conservation():
+    # the only way to have an average conservation of 2 is to select the first two epitopes
+    epitope_coverage = [
+        [1, 1, 0],
+        [1, 1, 0],
+        [0, 0, 1],
+        [0, 0, 1],
+        [0, 0, 1],
+    ]
+
+    test = BaseTest(
+        constraints=[sspa.MinimumCoverageAverageConservation(
+            epitope_coverage, min_conservation=2
+        )]
+    )
+    solution = test.solve_and_check()
+    assert set(solution.epitopes) == set([0, 1])

@@ -9,6 +9,7 @@ from pyomo.opt import SolverFactory, TerminationCondition
 from collections import namedtuple
 import logging
 from pcm import DoennesKohlbacherPcm
+import math
 
 
 VaccineResult = namedtuple('VaccineResult', [
@@ -174,6 +175,69 @@ class MinimumNTerminusCleavage(VaccineConstraints):
             return model.i[epi_start] >= model.MinNtCleavage
         else:
             return aml.Constraint.Satisfied
+
+
+class MinimumCoverageAverageConservation(VaccineConstraints):
+    ''' enforces minimum coverage and/or average epitope conservation
+        with respect to a given set of options (i.e., which epitope covers which options)
+    '''
+    # there can be more instances of this type on the same problem
+    # so we use a counter to provide unique default names
+    counter = 0
+
+    def __init__(self, epitope_coverage, min_coverage=None, min_conservation=None, name=None):
+        self._min_coverage = min_coverage
+        self._min_conservation = min_conservation
+        self._epitope_coverage = epitope_coverage
+
+        if name is None:
+            MinimumCoverageAverageConservation.counter += 1
+            self._name = 'CoverageConservation%d' % MinimumCoverageAverageConservation.counter
+        else:
+            self._name = name
+
+    def insert_constraints(self, model):
+        cs = {}  # we create components here, then insert them with the prefixed name
+
+        cs['Options'] = aml.RangeSet(0, len(self._epitope_coverage[0]) - 1)
+        cs['Coverage'] = aml.Param(model.Epitopes * cs['Options'],
+                                   initialize=lambda _, e, o: self._epitope_coverage[e][o])
+
+        if self._min_coverage is not None:
+            cs['IsOptionCovered'] = aml.Var(cs['Options'], domain=aml.Binary, initialize=0)
+            cs['AssignIsOptionCovered'] = aml.Constraint(
+                cs['Options'], rule=lambda model, option: sum(
+                    model.x[e, p] * cs['Coverage'][e, option]
+                    for e in model.Epitopes for p in model.EpitopePositions
+                ) >= cs['IsOptionCovered'][option]
+            )
+
+            cs['MinCoverage'] = aml.Param(initialize=(
+                self._min_coverage if isinstance(self._min_coverage, int)
+                else math.ceil(self._min_coverage * len(self._epitope_coverage[0]))
+            ))
+
+            cs['MinCoverageConstraint'] = aml.Constraint(rule=lambda model: sum(
+                cs['IsOptionCovered'][o] for o in cs['Options']
+            ) >= cs['MinCoverage'])
+
+        if self._min_conservation is not None:
+            cs['MinConservation'] = aml.Param(initialize=(
+                self._min_conservation if isinstance(self._min_conservation, int)
+                else math.ceil(self._min_conservation * len(self._epitope_coverage[0]))
+            ))
+
+            cs['MinConservationConstraint'] = aml.Constraint(rule=lambda model: sum(
+                model.x[e, p] * (
+                    sum(cs['Coverage'][e, o] for o in cs['Options'])
+                    - cs['MinConservation']
+                )
+                for e in model.Epitopes for p in model.EpitopePositions
+            ) >= 0)
+
+        for k, v in cs.items():
+            name = '%s_%s' % (self._name, k)
+            setattr(model, name, v)
 
 
 class StrobeSpacer:

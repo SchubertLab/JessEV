@@ -48,18 +48,25 @@ def save_run_info(ctx, result):
 @click.option('--max-spacer-length', '-S', default=4, help='Maximum length of the spacer to be designed')
 @click.option('--min-spacer-length', '-s', default=0, help='Minimum length of the spacer to be designed')
 @click.option('--num-epitopes', '-e', default=2, help='Number of epitopes in the vaccine')
-# vaccine constraints
+# selection constraints
+@click.option('--top-immunogen', help='Only consider the top epitopes by immunogenicity', type=float)
+@click.option('--top-proteins', help='Only consider the top epitopes by protein coverage', type=float)
+@click.option('--top-alleles', help='Only consider the top epitopes by allele coverage', type=float)
+@click.option('--min-alleles', help='Vaccine must cover at least this many alleles')
+@click.option('--min-proteins', help='Vaccine must cover at least this many proteins')
+@click.option('--min-avg-prot-conservation', type=float,
+              help='On average, epitopes in the vaccine must cover at least this many proteins')
+@click.option('--min-avg-alle-conservation', type=float,
+              help='On average, epitopes in the vaccine must cover at least this many alleles')
+# cleavage constraints
 @click.option('--min-nterminus-gap', '-g', help='Minimum cleavage gap', type=float)
 @click.option('--min-nterminus-cleavage', '-n', help='Minimum cleavage at the n-terminus', type=float)
 @click.option('--min-spacer-cleavage', '-c', help='Minimum cleavage inside the spacers', type=float)
 @click.option('--max-spacer-cleavage', '-C', help='Maximum cleavage inside the spacers', type=float)
 @click.option('--max-epitope-cleavage', '-E', help='Maximum cleavage inside epitopes', type=float)
-@click.option('--epitope-cleavage-ignore-first', '-i', help='Ignore first amino acids for epitope cleavage', type=int)
-# epitope pre-selection
-@click.option('--top-immunogen', help='Only consider the top epitopes by immunogenicity', type=float)
-@click.option('--top-proteins', help='Only consider the top epitopes by protein coverage', type=float)
-@click.option('--top-alleles', help='Only consider the top epitopes by allele coverage', type=float)
-# misc
+@click.option('--epitope-cleavage-ignore-first', '-i',
+              help='Ignore first amino acids for epitope cleavage', type=int)
+# logging
 @click.option('--log-file', type=click.Path(), help='Where to save the logs')
 @click.option('--verbose', is_flag=True, help='Print debug messages')
 @click.pass_context
@@ -83,7 +90,8 @@ def main(ctx, **kwargs):
 def design_strobe_spacers(
         input_epitopes, output_vaccine, max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
         top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage, log_file,
-        min_nterminus_cleavage, verbose, epitope_cleavage_ignore_first, max_spacer_cleavage
+        min_nterminus_cleavage, verbose, epitope_cleavage_ignore_first, max_spacer_cleavage,
+        min_alleles, min_proteins, min_avg_prot_conservation, min_avg_alle_conservation,
     ):
 
     epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
@@ -100,6 +108,16 @@ def design_strobe_spacers(
             max_epitope_cleavage, epitope_cleavage_ignore_first or 0))
     if min_nterminus_cleavage is not None:
         constraints.append(sspa.MinimumNTerminusCleavage(min_nterminus_cleavage))
+    if min_alleles is not None or min_avg_alle_conservation is not None:
+        allele_coverage = utilities.compute_allele_coverage(epitope_data.values())
+        constraints.append(sspa.MinimumCoverageAverageConservation(
+            allele_coverage, min_alleles, min_avg_alle_conservation, name='Alleles'
+        ))
+    if min_proteins is not None or min_avg_prot_conservation is not None:
+        protein_coverage = utilities.compute_protein_coverage(epitope_data.values())
+        constraints.append(sspa.MinimumCoverageAverageConservation(
+            protein_coverage, min_proteins, min_avg_prot_conservation, name='Proteins'
+        ))
 
     problem = sspa.StrobeSpacer(
         all_epitopes=epitopes,
