@@ -7,6 +7,11 @@ import subprocess
 import sys
 import traceback
 
+import pandas as pd
+
+from Fred2.Core import Allele, Peptide
+from Fred2.EpitopePrediction import EpitopePredictionResult
+
 
 def compute_allele_coverage(epitope_data):
     ''' compute allele coverage matrix
@@ -134,3 +139,30 @@ def main_dispatcher(main_fn, logger, click_ctx, main_kwargs):
             'exception': traceback.format_exception_only(exc_type, exc_value),
         })
         raise
+
+
+def get_alleles_and_thresholds(allele_file):
+    df = pd.read_csv(allele_file, index_col=['allele'])
+    return df
+
+
+def affinities_from_csv(bindings_file, allele_data=None, peptide_coverage=None):
+    ''' Loads binding affinities from a csv file. Optionally, augments alleles with probability
+        and peptides with protein coverage.
+    '''
+    df = pd.read_csv(bindings_file)
+
+    df['Seq'] = df.Seq.apply(Peptide)
+    if peptide_coverage is not None:
+        for pep in df.Seq:
+            for prot in peptide_coverage[str(pep)]:
+                pep.proteins[prot] = prot
+
+    df = df.set_index(['Seq', 'Method'])
+
+    if allele_data is not None:
+        df.columns = [Allele(c, allele_data[c]['frequency'] / 100) for c in df.columns]
+    else:
+        df.columns = [Allele(c) for c in df.columns]
+
+    return EpitopePredictionResult(df)
