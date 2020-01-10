@@ -1,44 +1,11 @@
-from __future__ import print_function, division
-
-import subprocess
-import traceback
-import sys
-import pprint
-import json
-import datetime
 import csv
+
+import click
+
 import strobe_spacers as sspa
 import utilities
-import click
-import logging
-
 
 LOGGER = None
-
-
-def save_run_info(ctx, result):
-    try:
-        git_head = subprocess.check_output(['git', 'rev-parse', 'HEAD'])
-        git_head = str(git_head).strip()
-    except subprocess.CalledProcessError:
-        git_head = None
-
-    run_info = {
-        'datetime': datetime.datetime.utcnow().isoformat(),
-        'file': __file__,
-        'command': ctx.command.name,
-        'params': ctx.params,
-        'head': git_head,
-        'result': result
-    }
-
-    LOGGER.debug('Run info:')
-    for row in pprint.pformat(run_info).split('\n'):
-        LOGGER.debug(row)
-
-    with open('dev/experiment-history.jsonl', 'a') as f:
-        f.write(json.dumps(run_info))
-        f.write('\n')
 
 
 @click.command()
@@ -70,28 +37,17 @@ def save_run_info(ctx, result):
 @click.option('--log-file', type=click.Path(), help='Where to save the logs')
 @click.option('--verbose', is_flag=True, help='Print debug messages')
 @click.pass_context
-def main(ctx, **kwargs):
+def main(ctx=None, **kwargs):
     global LOGGER
     LOGGER = utilities.init_logging(kwargs.get('verbose', False), kwargs.get('log_file', None))
-
-    try:
-        ret = design_strobe_spacers(**kwargs)
-        save_run_info(ctx, {'completed': True, 'result': ret})
-    except Exception as exc:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        save_run_info(ctx, {
-            'completed': False,
-            'traceback': traceback.format_tb(exc_traceback),
-            'exception': traceback.format_exception_only(exc_type, exc_value),
-        })
-        raise
+    utilities.main_dispatcher(design_strobe_spacers, LOGGER, ctx, kwargs)
 
 
 def design_strobe_spacers(
         input_epitopes, output_vaccine, max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
-        top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage, log_file,
-        min_nterminus_cleavage, verbose, epitope_cleavage_ignore_first, max_spacer_cleavage,
-        min_alleles, min_proteins, min_avg_prot_conservation, min_avg_alle_conservation,
+        top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage,
+        min_nterminus_cleavage, epitope_cleavage_ignore_first, max_spacer_cleavage, min_alleles,
+        min_proteins, min_avg_prot_conservation, min_avg_alle_conservation, **kwargs
     ):
 
     epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
