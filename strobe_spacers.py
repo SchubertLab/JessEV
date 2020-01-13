@@ -165,13 +165,13 @@ class MinimumNTerminusCleavage(VaccineConstraints):
     def insert_constraints(self, model):
         model.MinNtCleavage = aml.Param(initialize=self._min_cleavage)
         model.MinNtCleavageConstraint = aml.Constraint(
-            model.EpitopePositions * model.SequencePositions, rule=self._constraint_rule
+            model.EpitopePositions, rule=self._constraint_rule
         )
 
     @staticmethod
-    def _constraint_rule(model, epi, pos):
+    def _constraint_rule(model, epi):
         epi_start = epi * (model.MaxSpacerLength + model.EpitopeLength)
-        if epi > 0 and pos != epi_start:
+        if epi > 0:
             return model.i[epi_start] >= model.MinNtCleavage
         else:
             return aml.Constraint.Satisfied

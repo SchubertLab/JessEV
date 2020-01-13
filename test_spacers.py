@@ -132,6 +132,7 @@ def test_n_terminus_cleavage():
 
     second_epitope_start = 9 + len(solution.spacers[0])
     assert solution.cleavage[second_epitope_start] >= cleavage
+    assert solution.cleavage[0] < cleavage
 
 
 def test_coverage():
