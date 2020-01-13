@@ -186,7 +186,7 @@ class MinimumCTerminusCleavage(VaccineConstraints):
 
     def insert_constraints(self, model):
         model.MinCtCleavage = aml.Param(initialize=self._min_cleavage)
-        model.MinNtCleavageConstraint = aml.Constraint(
+        model.MinCtCleavageConstraint = aml.Constraint(
             model.SpacerPositions, rule=self._constraint_rule
         )
 
