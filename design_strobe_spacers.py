@@ -28,6 +28,7 @@ LOGGER = None
 # cleavage constraints
 @click.option('--min-nterminus-gap', '-g', help='Minimum cleavage gap', type=float)
 @click.option('--min-nterminus-cleavage', '-n', help='Minimum cleavage at the n-terminus', type=float)
+@click.option('--min-cterminus-cleavage', '-ct', help='Minimum cleavage at the n-terminus', type=float)
 @click.option('--min-spacer-cleavage', '-c', help='Minimum cleavage inside the spacers', type=float)
 @click.option('--max-spacer-cleavage', '-C', help='Maximum cleavage inside the spacers', type=float)
 @click.option('--max-epitope-cleavage', '-E', help='Maximum cleavage inside epitopes', type=float)
@@ -47,7 +48,7 @@ def design_strobe_spacers(
         input_epitopes, output_vaccine, max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
         top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage,
         min_nterminus_cleavage, epitope_cleavage_ignore_first, max_spacer_cleavage, min_alleles,
-        min_proteins, min_avg_prot_conservation, min_avg_alle_conservation, **kwargs
+        min_proteins, min_avg_prot_conservation, min_avg_alle_conservation, min_cterminus_cleavage, **kwargs
     ):
 
     epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
@@ -64,6 +65,8 @@ def design_strobe_spacers(
             max_epitope_cleavage, epitope_cleavage_ignore_first or 0))
     if min_nterminus_cleavage is not None:
         constraints.append(sspa.MinimumNTerminusCleavage(min_nterminus_cleavage))
+    if min_cterminus_cleavage is not None:
+        constraints.append(sspa.MinimumCTerminusCleavage(min_cterminus_cleavage))
     if min_alleles is not None or min_avg_alle_conservation is not None:
         allele_coverage = utilities.compute_allele_coverage(epitope_data.values())
         constraints.append(sspa.MinimumCoverageAverageConservation(
