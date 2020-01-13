@@ -177,6 +177,25 @@ class MinimumNTerminusCleavage(VaccineConstraints):
             return aml.Constraint.Satisfied
 
 
+class MinimumCTerminusCleavage(VaccineConstraints):
+    ''' enforces a minimum cleavage score at the first position of every spacer
+    '''
+
+    def __init__(self, min_cleavage):
+        self._min_cleavage = min_cleavage
+
+    def insert_constraints(self, model):
+        model.MinCtCleavage = aml.Param(initialize=self._min_cleavage)
+        model.MinNtCleavageConstraint = aml.Constraint(
+            model.SpacerPositions, rule=self._constraint_rule
+        )
+
+    @staticmethod
+    def _constraint_rule(model, spacer):
+        spacer_start = spacer * (model.MaxSpacerLength + model.EpitopeLength) + model.EpitopeLength
+        return model.i[spacer_start] >= model.MinCtCleavage
+
+
 class MinimumCoverageAverageConservation(VaccineConstraints):
     ''' enforces minimum coverage and/or average epitope conservation
         with respect to a given set of options (i.e., which epitope covers which options)

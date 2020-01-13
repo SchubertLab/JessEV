@@ -135,6 +135,20 @@ def test_n_terminus_cleavage():
     assert solution.cleavage[0] < cleavage
 
 
+def test_c_terminus_cleavage():
+    cleavage = 0.5
+    # there are several optimal solutions, so we only check the objective
+    test = BaseTest(
+        constraints=[sspa.MinimumCTerminusCleavage(cleavage)],
+        correct_immunogen=0.215,
+    )
+
+    solution = test.solve_and_check()
+
+    spacer_start = 9
+    assert solution.cleavage[spacer_start] >= cleavage
+
+
 def test_coverage():
     # the only way to cover three options is to select the first and last epitopes
     epitope_coverage = [
