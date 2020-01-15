@@ -148,15 +148,23 @@ def get_alleles_and_thresholds(allele_file):
 
 def affinities_from_csv(bindings_file, allele_data=None, peptide_coverage=None):
     ''' Loads binding affinities from a csv file. Optionally, augments alleles with probability
-        and peptides with protein coverage.
+        and peptides with protein coverage. Discards all peptides for which coverage is not provided.
     '''
     df = pd.read_csv(bindings_file)
 
     df['Seq'] = df.Seq.apply(Peptide)
     if peptide_coverage is not None:
+        keep = []
         for pep in df.Seq:
+            if pep not in peptide_coverage:
+                keep.append(False)
+                continue
+
+            keep.append(True)
             for prot in peptide_coverage[str(pep)]:
                 pep.proteins[prot] = prot
+
+        df = df[keep]
 
     df = df.set_index(['Seq', 'Method'])
 

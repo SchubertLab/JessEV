@@ -15,7 +15,6 @@ LOGGER = None
 
 
 @click.command()
-@click.argument('input-peptides', type=click.Path())
 @click.argument('input-epitopes', type=click.Path())
 @click.argument('input-alleles', type=click.Path())
 @click.argument('input-affinities', type=click.Path())
@@ -40,18 +39,21 @@ def main(ctx=None, **kwargs):
     run_sequential(**kwargs)
 
 
-def run_sequential(input_peptides, input_epitopes, input_alleles, input_affinities,
+def run_sequential(input_epitopes, input_alleles, input_affinities,
                    output_vaccine, num_epitopes, min_alleles, min_proteins,
                    solver, **kwargs):
 
-    with open(input_peptides) as f:
-        reader = csv.DictReader(f)
-        peptides = {
-            # we don't really need the actual protein sequence, just fill it with the id to make it unique
-            Peptide(r['peptide']): set(Protein(gid, gene_id=gid) for gid in r['proteins'].split(';'))
-            for r in reader
-        }
-    LOGGER.info('Loaded %d peptides', len(peptides))
+    epitope_data = {
+        k: v for k, v in utilities.load_epitopes(input_epitopes).items()
+        if 'X' not in k
+    }
+    LOGGER.info('Loaded %d epitopes', len(epitope_data))
+
+    peptide_coverage = {
+        # we don't really need the actual protein sequence, just fill it with the id to make it unique
+        Peptide(r['epitope']): set(Protein(gid, gene_id=gid) for gid in r['proteins'])
+        for r in epitope_data.values()
+    }
 
     allele_data = utilities.get_alleles_and_thresholds(input_alleles).to_dict('index')
     alleles = [Allele(allele.replace('HLA-', ''), prob=data['frequency'] / 100)
@@ -59,7 +61,7 @@ def run_sequential(input_peptides, input_epitopes, input_alleles, input_affiniti
     threshold = {allele.replace('HLA-', ''): data['threshold'] for allele, data in allele_data.items()}
     LOGGER.info('Loaded %d alleles', len(threshold))
 
-    affinities = utilities.affinities_from_csv(input_affinities, allele_data, peptide_coverage=peptides)
+    affinities = utilities.affinities_from_csv(input_affinities, allele_data, peptide_coverage=peptide_coverage)
     LOGGER.info('Loaded %d affinities', len(affinities))
 
     LOGGER.info('Selecting epitopes...')
@@ -76,7 +78,6 @@ def run_sequential(input_peptides, input_epitopes, input_alleles, input_affiniti
         threshold=threshold, solver=solver
     ).solve()
 
-    epitope_data = utilities.load_epitopes(input_epitopes)
     immunogen = sum(epitope_data[str(e)]['immunogen'] for e in vaccine[::2])
     sequence = ''.join(map(str, vaccine))
     cleavage = pcm.DoennesKohlbacherPcm().cleavage_per_position(sequence)
