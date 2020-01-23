@@ -32,8 +32,13 @@ LOGGER = None
 @click.option('--min-spacer-cleavage', '-c', help='Minimum cleavage inside the spacers', type=float)
 @click.option('--max-spacer-cleavage', '-C', help='Maximum cleavage inside the spacers', type=float)
 @click.option('--max-epitope-cleavage', '-E', help='Maximum cleavage inside epitopes', type=float)
-@click.option('--epitope-cleavage-ignore-first', '-i',
-              help='Ignore first amino acids for epitope cleavage', type=int)
+@click.option('--epitope-cleavage-ignore-first', '-i', type=int,
+              help='Ignore first amino acids for epitope cleavage')
+# immunogenicity computation options
+@click.option('--immunogen-mc-trials', '-mct', type=int,
+              help='Number of Monte-Carlo trials to estimate the immunogenicity')
+@click.option('--prior-cleavage-probability', '-cpp', type=float, default=0.1,
+              help='Prior cleavage probability to use in the Monte Carlo trials')
 # logging
 @click.option('--log-file', type=click.Path(), help='Where to save the logs')
 @click.option('--verbose', is_flag=True, help='Print debug messages')
@@ -48,7 +53,9 @@ def design_strobe_spacers(
         input_epitopes, output_vaccine, max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
         top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage,
         min_nterminus_cleavage, epitope_cleavage_ignore_first, max_spacer_cleavage, min_alleles,
-        min_proteins, min_avg_prot_conservation, min_avg_alle_conservation, min_cterminus_cleavage, **kwargs
+        min_proteins, min_avg_prot_conservation, min_avg_alle_conservation, min_cterminus_cleavage,
+        immunogen_mc_trials, prior_cleavage_probability,
+        **kwargs
     ):
 
     epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
@@ -78,6 +85,16 @@ def design_strobe_spacers(
             protein_coverage, min_proteins, min_avg_prot_conservation, name='Proteins'
         ))
 
+    if immunogen_mc_trials is not None:
+        if immunogen_mc_trials < 10:
+            raise ValueError('too few Monte Carlo trials')
+
+        objective = sspa.MonteCarloEffectiveImmunogenicityObjective(
+            immunogen_mc_trials, prior_cleavage_probability
+        )
+    else:
+        objective = sspa.ImmunogenicityObjective()
+
     problem = sspa.StrobeSpacer(
         all_epitopes=epitopes,
         epitope_immunogen=immunogens,
@@ -85,6 +102,7 @@ def design_strobe_spacers(
         max_spacer_length=max_spacer_length,
         vaccine_length=num_epitopes,
         vaccine_constraints=constraints,
+        vaccine_objective=objective,
     ).build_model()
 
     try:

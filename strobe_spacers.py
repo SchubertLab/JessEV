@@ -1,4 +1,5 @@
 from __future__ import division, print_function
+import random
 
 import sys
 from abc import abstractmethod, ABC
@@ -17,6 +18,67 @@ VaccineResult = namedtuple('VaccineResult', [
 ])
 
 
+def _insert_indicator_larger_than_constraints(model, name, indices, get_variables_bounds_fn, default=None):
+    '''
+    creates a variable of the given name and defined over the given indices (or uses the existing one)
+    that takes value one when the sum of a number of variables is larger than a threshold, zero otherwise.
+
+    get_variables_bound_fn takes as input the model and the indices, and must return a tuple
+    containing (in order):
+        - an iterable of variables to sum over
+        - the upper bound for the sum (not necessarily tight)
+        - the threshold above which the indicator is one
+    '''
+    if isinstance(name, aml.Var):
+        result_var, indices = name, name.index_set()
+        name = result_var.name
+    elif not hasattr(model, name):
+        result_var = aml.Var(indices, domain=aml.Binary, initialize=0)
+        setattr(model, name, result_var)
+    else:
+        result_var = getattr(model, name)
+        indices = result_var.index_set()
+
+    def positive_rule(model, *idx):
+        variables, upper_bound, threshold = get_variables_bounds_fn(model, *idx)
+        if variables:
+            return sum(variables) - upper_bound * result_var[idx] <= threshold
+        else:
+            return result_var[idx] == default
+
+    def negative_rule(model, *idx):
+        variables, upper_bound, threshold = get_variables_bounds_fn(model, *idx)
+        if variables:
+            return sum(variables) + upper_bound * (1 - result_var[idx]) >= threshold
+        else:
+            return result_var[idx] == default
+
+    setattr(model, name + 'SetPositive', aml.Constraint(indices, rule=positive_rule))
+    setattr(model, name + 'SetNegative', aml.Constraint(indices, rule=negative_rule))
+
+
+def _insert_conjunction_constraints(model, name, indices, get_conjunction_vars_fn, default=1):
+
+    def get_vars_and_bounds(model, *idx):
+        variables = get_conjunction_vars_fn(model, *idx)
+        upper_bound = len(variables) + 1
+        threshold = len(variables) - 0.5
+        return variables, upper_bound, threshold
+
+    _insert_indicator_larger_than_constraints(model, name, indices, get_vars_and_bounds, default)
+
+
+def _insert_disjunction_constraints(model, name, indices, get_conjunction_vars_fn, default=1):
+
+    def get_vars_and_bounds(model, *idx):
+        variables = get_conjunction_vars_fn(model, *idx)
+        upper_bound = len(variables) + 1
+        threshold = 0.5
+        return variables, upper_bound, threshold
+
+    _insert_indicator_larger_than_constraints(model, name, indices, get_vars_and_bounds, default)
+
+
 class SolverFailedException(Exception):
     def __init__(self, condition):
         self.condition = condition
@@ -27,7 +89,7 @@ class VaccineConstraints(ABC):
     '''
 
     @abstractmethod
-    def insert_constraints(self, model):
+    def insert_constraint(self, model):
         ''' simply modify the model as appropriate
         '''
 
@@ -63,7 +125,7 @@ class MinimumNTerminusCleavageGap(VaccineConstraints):
         else:
             return aml.Constraint.Satisfied
 
-    def insert_constraints(self, model):
+    def insert_constraint(self, model):
         model.MinCleavageGap = aml.Param(initialize=self._min_gap)
         model.NTerminusMask = aml.Var(
             model.EpitopePositions * model.SequencePositions,
@@ -104,7 +166,7 @@ class BoundCleavageInsideSpacers(VaccineConstraints):
         else:
             return aml.Constraint.Satisfied
 
-    def insert_constraints(self, model):
+    def insert_constraint(self, model):
         if self._min_cleavage is not None:
             model.MinSpacerCleavage = aml.Param(initialize=self._min_cleavage)
         if self._max_cleavage is not None:
@@ -141,7 +203,7 @@ class MaximumCleavageInsideEpitopes(VaccineConstraints):
         else:
             return aml.Constraint.Satisfied
 
-    def insert_constraints(self, model):
+    def insert_constraint(self, model):
         model.MaxInnerEpitopeCleavage = aml.Param(initialize=self._max_cleavage)
         model.MaxInnerEpitopeCleavageConstraint = aml.Constraint(
             model.EpitopePositions * model.PositionInsideEpitope, rule=self._constraint_rule
@@ -162,7 +224,7 @@ class MinimumNTerminusCleavage(VaccineConstraints):
     def __init__(self, min_cleavage):
         self._min_cleavage = min_cleavage
 
-    def insert_constraints(self, model):
+    def insert_constraint(self, model):
         model.MinNtCleavage = aml.Param(initialize=self._min_cleavage)
         model.MinNtCleavageConstraint = aml.Constraint(
             model.EpitopePositions, rule=self._constraint_rule
@@ -184,7 +246,7 @@ class MinimumCTerminusCleavage(VaccineConstraints):
     def __init__(self, min_cleavage):
         self._min_cleavage = min_cleavage
 
-    def insert_constraints(self, model):
+    def insert_constraint(self, model):
         model.MinCtCleavage = aml.Param(initialize=self._min_cleavage)
         model.MinCtCleavageConstraint = aml.Constraint(
             model.SpacerPositions, rule=self._constraint_rule
@@ -215,7 +277,7 @@ class MinimumCoverageAverageConservation(VaccineConstraints):
         else:
             self._name = name
 
-    def insert_constraints(self, model):
+    def insert_constraint(self, model):
         cs = {}  # we create components here, then insert them with the prefixed name
 
         cs['Options'] = aml.RangeSet(0, len(self._epitope_coverage[0]) - 1)
@@ -248,8 +310,7 @@ class MinimumCoverageAverageConservation(VaccineConstraints):
 
             cs['MinConservationConstraint'] = aml.Constraint(rule=lambda model: sum(
                 model.x[e, p] * (
-                    sum(cs['Coverage'][e, o] for o in cs['Options'])
-                    - cs['MinConservation']
+                    sum(cs['Coverage'][e, o] for o in cs['Options']) - cs['MinConservation']
                 )
                 for e in model.Epitopes for p in model.EpitopePositions
             ) >= 0)
@@ -257,6 +318,189 @@ class MinimumCoverageAverageConservation(VaccineConstraints):
         for k, v in cs.items():
             name = '%s_%s' % (self._name, k)
             setattr(model, name, v)
+
+
+class VaccineObjective(ABC):
+    ''' base class for the milp objective
+    '''
+
+    @abstractmethod
+    def insert_objective(self, model):
+        ''' insert the objective in the model
+        '''
+
+
+class MonteCarloEffectiveImmunogenicityObjective(VaccineObjective):
+    '''
+    this objective estimates the effective immunogenicity based on the epitopes
+    that are cleaved correctly. this latter part is estimated using monte-carlo
+    trials of Bernoulli variables whose probability is derived from the cleavage
+    scores. nb: cleavage only happens at least four positions apart
+    '''
+    def __init__(self, mc_draws=100, cleavage_prior=0.1):
+        self._mc_draws = mc_draws
+        self._cleavage_prior = math.log(cleavage_prior)
+
+    def _compute_bernoulli_trials(self, model):
+        ''' runs Bernoulli trials for every position
+            based on the cleavage scores
+        '''
+
+        # a Bernoulli trial in position p successful if the cleavage score
+        # is larger than the random number at position p
+        _insert_indicator_larger_than_constraints(
+            model, 'McBernoulliTrials',
+            model.McDrawIndices * model.SequencePositions,
+            lambda model, i, p: (
+                [model.i[p]],
+                25,
+                model.McRandoms[i, p],
+            )
+        )
+
+    def _compute_cleavage_locations(self, model):
+        ''' compute cleavage positions from the Bernoulli trials and
+            cleavage in the previous positions.
+        '''
+
+        # this variable contains the actual cleavage indicators
+        model.McCleavageTrials = aml.Var(model.McDrawIndices * model.SequencePositions,
+                                         domain=aml.Binary, initialize=0)
+
+        # this variable indicates whether position k is not blocking cleavage at position p
+        # k does not block p iff
+        #  - it is further than 4 amino acids, or
+        #  - it does not contain an amino acid, or
+        #  - it was not cleaved.
+        _insert_disjunction_constraints(
+            model, 'McCleavageNotBlocked',
+            model.McDrawIndices * model.SequencePositions * model.SequencePositions,
+            lambda model, i, p, k: [
+                1 - model.d[p, k],
+                1 - model.c[k],
+                1 - model.McCleavageTrials[i, k],
+            ] if k < p else [],
+            default=1.0
+        )
+
+        # cleavage happens at position p if
+        #  - p is not in the first four locations of the vaccine, and
+        #  - there was a successful Bernoulli trial at p, and
+        #  - none of the other positions block cleavage at p
+        def get_vars_cleavage_trials(model, i, p):
+            variables = []
+            if p > 3:
+                variables = [
+                    model.c[p],
+                    model.McBernoulliTrials[i, p],
+                ] + [
+                    model.McCleavageNotBlocked[i, p, j]
+                    for j in range(0, p)
+                ]
+            return variables
+
+        _insert_conjunction_constraints(
+            model, model.McCleavageTrials, None,
+            get_vars_cleavage_trials, default=0
+        )
+
+    @staticmethod
+    def _compute_cleavage_frequencies(model):
+        ''' compute cleavage frequencies, i.e. the average for every
+            position along the monte-carlo trials
+        '''
+        model.McCleavageProbs = aml.Var(model.SequencePositions)
+        model.McComputeProbs = aml.Constraint(
+            model.SequencePositions,
+            rule=lambda model, p: model.McCleavageProbs[p] == sum(
+                model.McCleavageTrials[i, p] for i in model.McDrawIndices
+            ) / model.McDrawCount
+        )
+
+    def _compute_recovered_epitopes(self, model):
+        ''' for every epitope position, decide if it was recovered or not
+        '''
+
+        # the epitope in position p is recovered if
+        #  - there was no cleavage inside the epitope itself, and
+        #  - there was cleavage at the n-terminus or p is the first epitope, and
+        #  - there was cleavage at the c-terminus or p is the last epitope
+        def get_conj_vars(model, i, p):
+            nterminus_position = p * (model.EpitopeLength + model.MaxSpacerLength)
+            cterminus_position = p * (model.EpitopeLength + model.MaxSpacerLength) + model.EpitopeLength
+
+            inside_not_cleavage = [
+                1 - model.McCleavageTrials[i, j]
+                for j in range(nterminus_position + 1, cterminus_position)
+            ]
+
+            if p == model.VaccineLength - 1:
+                return inside_not_cleavage + [model.McCleavageTrials[i, nterminus_position]]
+            elif p == 0:
+                return inside_not_cleavage + [model.McCleavageTrials[i, cterminus_position]]
+            else:
+                return inside_not_cleavage + [
+                    model.McCleavageTrials[i, cterminus_position],
+                    model.McCleavageTrials[i, nterminus_position],
+                ]
+
+        _insert_conjunction_constraints(
+            model, 'McRecoveredEpitopes',
+            model.McDrawIndices * model.EpitopePositions,
+            get_conj_vars,
+        )
+
+    @staticmethod
+    def _compute_effective_immunogen(model):
+        ''' compute the effective immunogenicity, i.e. the average immunogenicity of the
+            epitopes in the vaccine, weighted by the recovery probability of each epitope
+        '''
+
+        # effective immunogenicity for each Monte Carlo simulation (useful for debugging)
+        model.McEffectiveImmunogen = aml.Var(model.McDrawIndices, domain=aml.Reals, initialize=0)
+        model.McAssignEffectiveImmunogen = aml.Constraint(
+            model.McDrawIndices * model.EpitopePositions,
+            rule=lambda model, i, p: model.McEffectiveImmunogen[i] == sum(
+                model.McRecoveredEpitopes[i, p] * model.x[e, p] * model.EpitopeImmunogen[e]
+                for e in model.Epitopes for p in model.EpitopePositions
+            )
+        )
+
+        model.EffectiveImmunogenicity = aml.Var(domain=aml.Reals, initialize=0)
+        model.AssignEffectiveImmunogenicity = aml.Constraint(rule=lambda model: sum(
+            model.McEffectiveImmunogen[i] for i in model.McDrawIndices
+        ) / model.McDrawCount == model.EffectiveImmunogenicity)
+
+
+    def insert_objective(self, model):
+        model.McDrawIndices = aml.RangeSet(0, self._mc_draws - 1)
+        model.McDrawCount = aml.Param(initialize=self._mc_draws)
+        model.McRandoms = aml.Param(
+            model.McDrawIndices * model.SequencePositions,
+            initialize=lambda *_: math.log(random.random()) - self._cleavage_prior
+        )
+
+        self._compute_bernoulli_trials(model)
+        self._compute_cleavage_locations(model)
+        self._compute_cleavage_frequencies(model)
+        self._compute_recovered_epitopes(model)
+        self._compute_effective_immunogen(model)
+
+        model.Objective = aml.Objective(rule=lambda model: model.EffectiveImmunogenicity, sense=aml.maximize)
+        return model.Objective
+
+
+class ImmunogenicityObjective(VaccineObjective):
+    ''' this objective maximizes the sum of the immunogenicities of the selected epitopes
+    '''
+    def insert_objective(self, model):
+        model.Immunogenicity = aml.Var()
+        model.AssignImmunogenicity = aml.Constraint(rule=lambda model: model.Immunogenicity == sum(
+            model.x[i, j] * model.EpitopeImmunogen[i] for i in model.Epitopes for j in model.EpitopePositions
+        ))
+
+        model.Objective = aml.Objective(rule=lambda model: model.Immunogenicity, sense=aml.maximize)
+        return model.Objective
 
 
 class StrobeSpacer:
@@ -290,6 +534,9 @@ class StrobeSpacer:
         # constraint(s) to be applied to the vaccine
         vaccine_constraints,
 
+        # objective(s) for the milp
+        vaccine_objective,
+
         # object containing the pcm matrix, or None for default
         pcm=None,
     ):
@@ -322,7 +569,12 @@ class StrobeSpacer:
         self._logger = logging.getLogger(self.__class__.__name__)
         self._vaccine_constraints = [vaccine_constraints] if not hasattr(
             vaccine_constraints, '__iter__') else vaccine_constraints
+        self._vaccine_objective = vaccine_objective
         self._built = False
+
+        # TODO check and repair (if possible) inconsistencies between constraints
+        # for example, max epitope cleavage & min nterminus cleavage
+        # or max spacer cleavage & min cterminus cleavage
 
     def _fetch_pcm_matrix(self):
         ''' validates and scrambles the pcm matrix in the format used by the ilp
@@ -573,17 +825,10 @@ class StrobeSpacer:
 
         self._logger.debug('Building custom vaccine constraints...')
         for constr in self._vaccine_constraints:
-            constr.insert_constraints(self._model)
+            constr.insert_constraint(self._model)
 
         self._logger.debug('Building immunogenicity objective...')
-
-        # store immunogenicity in a variable
-        self._model.Immunogenicity = aml.Var()
-        self._model.AssignImmunogenicity = aml.Constraint(rule=lambda model: model.Immunogenicity == sum(
-            model.x[i, j] * model.EpitopeImmunogen[i] for i in model.Epitopes for j in model.EpitopePositions
-        ))
-
-        self._model.Objective = aml.Objective(rule=lambda model: model.Immunogenicity, sense=aml.maximize)
+        self._objective_variable = self._vaccine_objective.insert_objective(self._model)
 
         self._solver = SolverFactory(self._solver_type)
         self._solver.set_instance(self._model)
@@ -667,4 +912,8 @@ class StrobeSpacer:
             if aml.value(self._model.c[i]) > 0.9
         ]
 
-        return VaccineResult(epitopes, spacers, sequence, aml.value(self._model.Immunogenicity), cleavage)
+        return VaccineResult(
+            epitopes, spacers, sequence,
+            aml.value(self._objective_variable),
+            cleavage
+        )
