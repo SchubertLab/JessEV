@@ -2,6 +2,8 @@ import csv
 
 import click
 
+import constraints as ssc
+import objectives as sso
 import strobe_spacers as sspa
 import utilities
 
@@ -50,13 +52,13 @@ def main(ctx=None, **kwargs):
 
 
 def design_strobe_spacers(
-        input_epitopes, output_vaccine, max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
-        top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage,
-        min_nterminus_cleavage, epitope_cleavage_ignore_first, max_spacer_cleavage, min_alleles,
-        min_proteins, min_avg_prot_conservation, min_avg_alle_conservation, min_cterminus_cleavage,
-        immunogen_mc_trials, prior_cleavage_probability,
-        **kwargs
-    ):
+    input_epitopes, output_vaccine, max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
+    top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage,
+    min_nterminus_cleavage, epitope_cleavage_ignore_first, max_spacer_cleavage, min_alleles,
+    min_proteins, min_avg_prot_conservation, min_avg_alle_conservation, min_cterminus_cleavage,
+    immunogen_mc_trials, prior_cleavage_probability,
+    **kwargs
+):
 
     epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
     epitopes = list(epitope_data.keys())
@@ -64,24 +66,24 @@ def design_strobe_spacers(
 
     constraints = []
     if min_nterminus_gap is not None:
-        constraints.append(sspa.MinimumNTerminusCleavageGap(min_nterminus_gap))
+        constraints.append(ssc.MinimumNTerminusCleavageGap(min_nterminus_gap))
     if min_spacer_cleavage is not None or max_spacer_cleavage is not None:
-        constraints.append(sspa.BoundCleavageInsideSpacers(min_spacer_cleavage, max_spacer_cleavage))
+        constraints.append(ssc.BoundCleavageInsideSpacers(min_spacer_cleavage, max_spacer_cleavage))
     if max_epitope_cleavage is not None:
-        constraints.append(sspa.MaximumCleavageInsideEpitopes(
+        constraints.append(ssc.MaximumCleavageInsideEpitopes(
             max_epitope_cleavage, epitope_cleavage_ignore_first or 0))
     if min_nterminus_cleavage is not None:
-        constraints.append(sspa.MinimumNTerminusCleavage(min_nterminus_cleavage))
+        constraints.append(ssc.MinimumNTerminusCleavage(min_nterminus_cleavage))
     if min_cterminus_cleavage is not None:
-        constraints.append(sspa.MinimumCTerminusCleavage(min_cterminus_cleavage))
+        constraints.append(ssc.MinimumCTerminusCleavage(min_cterminus_cleavage))
     if min_alleles is not None or min_avg_alle_conservation is not None:
         allele_coverage = utilities.compute_allele_coverage(epitope_data.values())
-        constraints.append(sspa.MinimumCoverageAverageConservation(
+        constraints.append(ssc.MinimumCoverageAverageConservation(
             allele_coverage, min_alleles, min_avg_alle_conservation, name='Alleles'
         ))
     if min_proteins is not None or min_avg_prot_conservation is not None:
         protein_coverage = utilities.compute_protein_coverage(epitope_data.values())
-        constraints.append(sspa.MinimumCoverageAverageConservation(
+        constraints.append(ssc.MinimumCoverageAverageConservation(
             protein_coverage, min_proteins, min_avg_prot_conservation, name='Proteins'
         ))
 
@@ -89,11 +91,11 @@ def design_strobe_spacers(
         if immunogen_mc_trials < 10:
             raise ValueError('too few Monte Carlo trials')
 
-        objective = sspa.MonteCarloEffectiveImmunogenicityObjective(
+        objective = sso.MonteCarloEffectiveImmunogenicityObjective(
             immunogen_mc_trials, prior_cleavage_probability
         )
     else:
-        objective = sspa.ImmunogenicityObjective()
+        objective = sso.ImmunogenicityObjective()
 
     problem = sspa.StrobeSpacer(
         all_epitopes=epitopes,

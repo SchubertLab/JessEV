@@ -1,506 +1,23 @@
-from __future__ import division, print_function
-import random
-
-import sys
-from abc import abstractmethod, ABC
+import logging
 import multiprocessing as mp
+import sys
+from collections import namedtuple
+
 import pyomo.environ as aml
 import pyomo.kernel as pmo
 from pyomo.opt import SolverFactory, TerminationCondition
-from collections import namedtuple
-import logging
-from pcm import DoennesKohlbacherPcm
-import math
 
+import utilities
+from pcm import DoennesKohlbacherPcm
 
 VaccineResult = namedtuple('VaccineResult', [
     'epitopes', 'spacers', 'sequence', 'immunogen', 'cleavage'
 ])
 
 
-def _insert_indicator_larger_than_constraints(model, name, indices, get_variables_bounds_fn, default=None):
-    '''
-    creates a variable of the given name and defined over the given indices (or uses the existing one)
-    that takes value one when the sum of a number of variables is larger than a threshold, zero otherwise.
-
-    get_variables_bound_fn takes as input the model and the indices, and must return a tuple
-    containing (in order):
-        - an iterable of variables to sum over
-        - the upper bound for the sum (not necessarily tight)
-        - the threshold above which the indicator is one
-    '''
-    if isinstance(name, aml.Var):
-        result_var, indices = name, name.index_set()
-        name = result_var.name
-    elif not hasattr(model, name):
-        result_var = aml.Var(indices, domain=aml.Binary, initialize=0)
-        setattr(model, name, result_var)
-    else:
-        result_var = getattr(model, name)
-        indices = result_var.index_set()
-
-    def positive_rule(model, *idx):
-        variables, upper_bound, threshold = get_variables_bounds_fn(model, *idx)
-        if variables:
-            return sum(variables) - upper_bound * result_var[idx] <= threshold
-        else:
-            return result_var[idx] == default
-
-    def negative_rule(model, *idx):
-        variables, upper_bound, threshold = get_variables_bounds_fn(model, *idx)
-        if variables:
-            return sum(variables) + upper_bound * (1 - result_var[idx]) >= threshold
-        else:
-            return result_var[idx] == default
-
-    setattr(model, name + 'SetPositive', aml.Constraint(indices, rule=positive_rule))
-    setattr(model, name + 'SetNegative', aml.Constraint(indices, rule=negative_rule))
-
-
-def _insert_conjunction_constraints(model, name, indices, get_conjunction_vars_fn, default=1):
-
-    def get_vars_and_bounds(model, *idx):
-        variables = get_conjunction_vars_fn(model, *idx)
-        upper_bound = len(variables) + 1
-        threshold = len(variables) - 0.5
-        return variables, upper_bound, threshold
-
-    _insert_indicator_larger_than_constraints(model, name, indices, get_vars_and_bounds, default)
-
-
-def _insert_disjunction_constraints(model, name, indices, get_conjunction_vars_fn, default=1):
-
-    def get_vars_and_bounds(model, *idx):
-        variables = get_conjunction_vars_fn(model, *idx)
-        upper_bound = len(variables) + 1
-        threshold = 0.5
-        return variables, upper_bound, threshold
-
-    _insert_indicator_larger_than_constraints(model, name, indices, get_vars_and_bounds, default)
-
-
 class SolverFailedException(Exception):
     def __init__(self, condition):
         self.condition = condition
-
-
-class VaccineConstraints(ABC):
-    ''' base class for adding constraints to the milp model
-    '''
-
-    @abstractmethod
-    def insert_constraint(self, model):
-        ''' simply modify the model as appropriate
-        '''
-
-
-class MinimumNTerminusCleavageGap(VaccineConstraints):
-    ''' enforces a given minimum cleavage gap between the first position of an epitope
-        (which indicates correct cleavage at the end of the preceding spacer)
-        and the cleavage of surrounding amino acids (next one and previous four)
-    '''
-
-    def __init__(self, min_gap):
-        self._min_gap = min_gap
-
-    @staticmethod
-    def _assign_mask(model, epi, pos):
-        if epi > 0:
-            epi_start = epi * (model.MaxSpacerLength + model.EpitopeLength)
-            return model.NTerminusMask[epi, pos] == model.d[epi_start, pos] * model.g[epi_start, pos]
-        else:
-            return aml.Constraint.Satisfied
-
-    @staticmethod
-    def _constraint_rule(model, epi, pos):
-        epi_start = epi * (model.MaxSpacerLength + model.EpitopeLength)
-        if epi > 0 and pos != epi_start:
-            # remove a large constant when c[pos] = 0 to satisfy the constraint
-            # when this position is empty
-            return (
-                model.i[epi_start] * model.NTerminusMask[epi, pos]
-            ) >= (
-                model.i[pos] + model.MinCleavageGap
-            ) * model.NTerminusMask[epi, pos] - 50 * (1 - model.c[pos])
-        else:
-            return aml.Constraint.Satisfied
-
-    def insert_constraint(self, model):
-        model.MinCleavageGap = aml.Param(initialize=self._min_gap)
-        model.NTerminusMask = aml.Var(
-            model.EpitopePositions * model.SequencePositions,
-            domain=aml.Binary, initialize=0
-        )
-        model.AssignNTerminusMask = aml.Constraint(
-            model.EpitopePositions * model.SequencePositions, rule=self._assign_mask
-        )
-        model.MinCleavageGapConstraint = aml.Constraint(
-            model.EpitopePositions * model.SequencePositions, rule=self._constraint_rule
-        )
-
-
-class BoundCleavageInsideSpacers(VaccineConstraints):
-    ''' enforces a given minimum/maximum cleavage likelihood inside every spacer
-        use None to disable the corresponding constraint
-    '''
-
-    def __init__(self, min_cleavage, max_cleavage):
-        self._min_cleavage = min_cleavage
-        self._max_cleavage = max_cleavage
-
-    def _constraint_rule(self, model, spacer, position):
-        # absolute position in the sequence
-        pos = (model.EpitopeLength + model.MaxSpacerLength) * spacer + position + model.EpitopeLength
-
-        # I don't know why returning a tuple does not work
-        if self._min_cleavage is not None and self._max_cleavage is not None:
-            return (
-                model.MinSpacerCleavage * model.c[pos]
-                <= model.i[pos] <=
-                model.MaxSpacerCleavage * model.c[pos]
-            )
-        elif self._min_cleavage is not None:
-            return model.MinSpacerCleavage * model.c[pos] <= model.i[pos]
-        elif self._max_cleavage is not None:
-            return model.i[pos] <= model.MaxSpacerCleavage * model.c[pos]
-        else:
-            return aml.Constraint.Satisfied
-
-    def insert_constraint(self, model):
-        if self._min_cleavage is not None:
-            model.MinSpacerCleavage = aml.Param(initialize=self._min_cleavage)
-        if self._max_cleavage is not None:
-            model.MaxSpacerCleavage = aml.Param(initialize=self._max_cleavage)
-
-        model.BoundCleavageInsideSpacersConstraint = aml.Constraint(
-            model.SpacerPositions * model.AminoacidPositions,
-            rule=self._constraint_rule
-        )
-
-
-class MaximumCleavageInsideEpitopes(VaccineConstraints):
-    ''' enforces a given maximum cleavage inside the epitopes
-        possibly ignoring the first few amino acids
-
-        nb: if this constraint is used together with `MinimumNTerminusCleavage`,
-        you should ignore the first amino acid, as it corresponds to the
-        n-terminus. if you don't do that, the problem is infeasible as the two
-        constraints would contradict each other.
-
-        this is indeed the default behavior, as we are very interested in
-        cleavage at the n-terminus
-
-    '''
-
-    def __init__(self, max_cleavage, ignore_first=1):
-        self._max_cleavage = max_cleavage
-        self._ignore_first = ignore_first
-
-    def _constraint_rule(self, model, epitope, offset):
-        if offset >= self._ignore_first:
-            pos = (model.EpitopeLength + model.MaxSpacerLength) * epitope + offset
-            return model.i[pos] <= model.MaxInnerEpitopeCleavage
-        else:
-            return aml.Constraint.Satisfied
-
-    def insert_constraint(self, model):
-        model.MaxInnerEpitopeCleavage = aml.Param(initialize=self._max_cleavage)
-        model.MaxInnerEpitopeCleavageConstraint = aml.Constraint(
-            model.EpitopePositions * model.PositionInsideEpitope, rule=self._constraint_rule
-        )
-
-
-class MinimumNTerminusCleavage(VaccineConstraints):
-    ''' enforces a given minimum cleavage at the first position of an epitope
-        (which indicates correct cleavage at the end of the preceding spacer)
-
-        nb: if this constraint is used together with
-        `MaximumCleavageInsideEpitopes`, you should instruct that constraint to
-        ignore the first amino acid, as it corresponds to the n-terminus. if
-        you don't do that, the problem is infeasible as the two constraints
-        would contradict each other
-    '''
-
-    def __init__(self, min_cleavage):
-        self._min_cleavage = min_cleavage
-
-    def insert_constraint(self, model):
-        model.MinNtCleavage = aml.Param(initialize=self._min_cleavage)
-        model.MinNtCleavageConstraint = aml.Constraint(
-            model.EpitopePositions, rule=self._constraint_rule
-        )
-
-    @staticmethod
-    def _constraint_rule(model, epi):
-        epi_start = epi * (model.MaxSpacerLength + model.EpitopeLength)
-        if epi > 0:
-            return model.i[epi_start] >= model.MinNtCleavage
-        else:
-            return aml.Constraint.Satisfied
-
-
-class MinimumCTerminusCleavage(VaccineConstraints):
-    ''' enforces a minimum cleavage score at the first position of every spacer
-    '''
-
-    def __init__(self, min_cleavage):
-        self._min_cleavage = min_cleavage
-
-    def insert_constraint(self, model):
-        model.MinCtCleavage = aml.Param(initialize=self._min_cleavage)
-        model.MinCtCleavageConstraint = aml.Constraint(
-            model.SpacerPositions, rule=self._constraint_rule
-        )
-
-    @staticmethod
-    def _constraint_rule(model, spacer):
-        spacer_start = spacer * (model.MaxSpacerLength + model.EpitopeLength) + model.EpitopeLength
-        return model.i[spacer_start] >= model.MinCtCleavage
-
-
-class MinimumCoverageAverageConservation(VaccineConstraints):
-    ''' enforces minimum coverage and/or average epitope conservation
-        with respect to a given set of options (i.e., which epitope covers which options)
-    '''
-    # there can be more instances of this type on the same problem
-    # so we use a counter to provide unique default names
-    counter = 0
-
-    def __init__(self, epitope_coverage, min_coverage=None, min_conservation=None, name=None):
-        self._min_coverage = min_coverage
-        self._min_conservation = min_conservation
-        self._epitope_coverage = epitope_coverage
-
-        if name is None:
-            MinimumCoverageAverageConservation.counter += 1
-            self._name = 'CoverageConservation%d' % MinimumCoverageAverageConservation.counter
-        else:
-            self._name = name
-
-    def insert_constraint(self, model):
-        cs = {}  # we create components here, then insert them with the prefixed name
-
-        cs['Options'] = aml.RangeSet(0, len(self._epitope_coverage[0]) - 1)
-        cs['Coverage'] = aml.Param(model.Epitopes * cs['Options'],
-                                   initialize=lambda _, e, o: self._epitope_coverage[e][o])
-
-        if self._min_coverage is not None:
-            cs['IsOptionCovered'] = aml.Var(cs['Options'], domain=aml.Binary, initialize=0)
-            cs['AssignIsOptionCovered'] = aml.Constraint(
-                cs['Options'], rule=lambda model, option: sum(
-                    model.x[e, p] * cs['Coverage'][e, option]
-                    for e in model.Epitopes for p in model.EpitopePositions
-                ) >= cs['IsOptionCovered'][option]
-            )
-
-            cs['MinCoverage'] = aml.Param(initialize=(
-                self._min_coverage if isinstance(self._min_coverage, int)
-                else math.ceil(self._min_coverage * len(self._epitope_coverage[0]))
-            ))
-
-            cs['MinCoverageConstraint'] = aml.Constraint(rule=lambda model: sum(
-                cs['IsOptionCovered'][o] for o in cs['Options']
-            ) >= cs['MinCoverage'])
-
-        if self._min_conservation is not None:
-            cs['MinConservation'] = aml.Param(initialize=(
-                self._min_conservation if isinstance(self._min_conservation, int)
-                else math.ceil(self._min_conservation * len(self._epitope_coverage[0]))
-            ))
-
-            cs['MinConservationConstraint'] = aml.Constraint(rule=lambda model: sum(
-                model.x[e, p] * (
-                    sum(cs['Coverage'][e, o] for o in cs['Options']) - cs['MinConservation']
-                )
-                for e in model.Epitopes for p in model.EpitopePositions
-            ) >= 0)
-
-        for k, v in cs.items():
-            name = '%s_%s' % (self._name, k)
-            setattr(model, name, v)
-
-
-class VaccineObjective(ABC):
-    ''' base class for the milp objective
-    '''
-
-    @abstractmethod
-    def insert_objective(self, model):
-        ''' insert the objective in the model
-        '''
-
-
-class MonteCarloEffectiveImmunogenicityObjective(VaccineObjective):
-    '''
-    this objective estimates the effective immunogenicity based on the epitopes
-    that are cleaved correctly. this latter part is estimated using monte-carlo
-    trials of Bernoulli variables whose probability is derived from the cleavage
-    scores. nb: cleavage only happens at least four positions apart
-    '''
-    def __init__(self, mc_draws=100, cleavage_prior=0.1):
-        self._mc_draws = mc_draws
-        self._cleavage_prior = math.log(cleavage_prior)
-
-    def _compute_bernoulli_trials(self, model):
-        ''' runs Bernoulli trials for every position
-            based on the cleavage scores
-        '''
-
-        # a Bernoulli trial in position p successful if the cleavage score
-        # is larger than the random number at position p
-        _insert_indicator_larger_than_constraints(
-            model, 'McBernoulliTrials',
-            model.McDrawIndices * model.SequencePositions,
-            lambda model, i, p: (
-                [model.i[p]],
-                25,
-                model.McRandoms[i, p],
-            )
-        )
-
-    def _compute_cleavage_locations(self, model):
-        ''' compute cleavage positions from the Bernoulli trials and
-            cleavage in the previous positions.
-        '''
-
-        # this variable contains the actual cleavage indicators
-        model.McCleavageTrials = aml.Var(model.McDrawIndices * model.SequencePositions,
-                                         domain=aml.Binary, initialize=0)
-
-        # this variable indicates whether position k is not blocking cleavage at position p
-        # k does not block p iff
-        #  - it is further than 4 amino acids, or
-        #  - it does not contain an amino acid, or
-        #  - it was not cleaved.
-        _insert_disjunction_constraints(
-            model, 'McCleavageNotBlocked',
-            model.McDrawIndices * model.SequencePositions * model.SequencePositions,
-            lambda model, i, p, k: [
-                1 - model.d[p, k],
-                1 - model.c[k],
-                1 - model.McCleavageTrials[i, k],
-            ] if k < p else [],
-            default=1.0
-        )
-
-        # cleavage happens at position p if
-        #  - p is not in the first four locations of the vaccine, and
-        #  - there was a successful Bernoulli trial at p, and
-        #  - none of the other positions block cleavage at p
-        def get_vars_cleavage_trials(model, i, p):
-            variables = []
-            if p > 3:
-                variables = [
-                    model.c[p],
-                    model.McBernoulliTrials[i, p],
-                ] + [
-                    model.McCleavageNotBlocked[i, p, j]
-                    for j in range(0, p)
-                ]
-            return variables
-
-        _insert_conjunction_constraints(
-            model, model.McCleavageTrials, None,
-            get_vars_cleavage_trials, default=0
-        )
-
-    @staticmethod
-    def _compute_cleavage_frequencies(model):
-        ''' compute cleavage frequencies, i.e. the average for every
-            position along the monte-carlo trials
-        '''
-        model.McCleavageProbs = aml.Var(model.SequencePositions)
-        model.McComputeProbs = aml.Constraint(
-            model.SequencePositions,
-            rule=lambda model, p: model.McCleavageProbs[p] == sum(
-                model.McCleavageTrials[i, p] for i in model.McDrawIndices
-            ) / model.McDrawCount
-        )
-
-    def _compute_recovered_epitopes(self, model):
-        ''' for every epitope position, decide if it was recovered or not
-        '''
-
-        # the epitope in position p is recovered if
-        #  - there was no cleavage inside the epitope itself, and
-        #  - there was cleavage at the n-terminus or p is the first epitope, and
-        #  - there was cleavage at the c-terminus or p is the last epitope
-        def get_conj_vars(model, i, p):
-            nterminus_position = p * (model.EpitopeLength + model.MaxSpacerLength)
-            cterminus_position = p * (model.EpitopeLength + model.MaxSpacerLength) + model.EpitopeLength
-
-            inside_not_cleavage = [
-                1 - model.McCleavageTrials[i, j]
-                for j in range(nterminus_position + 1, cterminus_position)
-            ]
-
-            if p == model.VaccineLength - 1:
-                return inside_not_cleavage + [model.McCleavageTrials[i, nterminus_position]]
-            elif p == 0:
-                return inside_not_cleavage + [model.McCleavageTrials[i, cterminus_position]]
-            else:
-                return inside_not_cleavage + [
-                    model.McCleavageTrials[i, cterminus_position],
-                    model.McCleavageTrials[i, nterminus_position],
-                ]
-
-        _insert_conjunction_constraints(
-            model, 'McRecoveredEpitopes',
-            model.McDrawIndices * model.EpitopePositions,
-            get_conj_vars,
-        )
-
-    @staticmethod
-    def _compute_effective_immunogen(model):
-        ''' compute the effective immunogenicity, i.e. the average immunogenicity of the
-            epitopes in the vaccine, weighted by the recovery probability of each epitope
-        '''
-
-        # effective immunogenicity for each Monte Carlo simulation (useful for debugging)
-        model.McEffectiveImmunogen = aml.Var(model.McDrawIndices, domain=aml.Reals, initialize=0)
-        model.McAssignEffectiveImmunogen = aml.Constraint(
-            model.McDrawIndices * model.EpitopePositions,
-            rule=lambda model, i, p: model.McEffectiveImmunogen[i] == sum(
-                model.McRecoveredEpitopes[i, p] * model.x[e, p] * model.EpitopeImmunogen[e]
-                for e in model.Epitopes for p in model.EpitopePositions
-            )
-        )
-
-        model.EffectiveImmunogenicity = aml.Var(domain=aml.Reals, initialize=0)
-        model.AssignEffectiveImmunogenicity = aml.Constraint(rule=lambda model: sum(
-            model.McEffectiveImmunogen[i] for i in model.McDrawIndices
-        ) / model.McDrawCount == model.EffectiveImmunogenicity)
-
-
-    def insert_objective(self, model):
-        model.McDrawIndices = aml.RangeSet(0, self._mc_draws - 1)
-        model.McDrawCount = aml.Param(initialize=self._mc_draws)
-        model.McRandoms = aml.Param(
-            model.McDrawIndices * model.SequencePositions,
-            initialize=lambda *_: math.log(random.random()) - self._cleavage_prior
-        )
-
-        self._compute_bernoulli_trials(model)
-        self._compute_cleavage_locations(model)
-        self._compute_cleavage_frequencies(model)
-        self._compute_recovered_epitopes(model)
-        self._compute_effective_immunogen(model)
-
-        model.Objective = aml.Objective(rule=lambda model: model.EffectiveImmunogenicity, sense=aml.maximize)
-        return model.Objective
-
-
-class ImmunogenicityObjective(VaccineObjective):
-    ''' this objective maximizes the sum of the immunogenicities of the selected epitopes
-    '''
-    def insert_objective(self, model):
-        model.Immunogenicity = aml.Var()
-        model.AssignImmunogenicity = aml.Constraint(rule=lambda model: model.Immunogenicity == sum(
-            model.x[i, j] * model.EpitopeImmunogen[i] for i in model.Epitopes for j in model.EpitopePositions
-        ))
-
-        model.Objective = aml.Objective(rule=lambda model: model.Immunogenicity, sense=aml.maximize)
-        return model.Objective
 
 
 class StrobeSpacer:
@@ -601,11 +118,11 @@ class StrobeSpacer:
         self._model.SpacerPositions = aml.RangeSet(0, self._vaccine_length - 2)
         self._model.AminoacidPositions = aml.RangeSet(0, self._max_spacer_length - 1)
         self._model.PcmIdx = aml.RangeSet(-4, 1)
-        sequence_length = (
+        self._sequence_length = (
             self._vaccine_length * self._epitope_length +
             (self._vaccine_length - 1) * self._max_spacer_length - 1
         )
-        self._model.SequencePositions = aml.RangeSet(0, sequence_length)
+        self._model.SequencePositions = aml.RangeSet(0, self._sequence_length)
         self._model.PositionInsideEpitope = aml.RangeSet(0, self._epitope_length - 1)
 
         self._model.MinSpacerLength = aml.Param(initialize=self._min_spacer_length)
@@ -642,7 +159,7 @@ class StrobeSpacer:
         # o(ij) counts how many aminoacids are selected between position i and position j
         # o(ij) < 0 <=> j < i and 0 when i = j. it counts the amino acid in position j, not the one in position i
         self._model.o = aml.Var(self._model.SequencePositions * self._model.SequencePositions,
-                                bounds=(-sequence_length, sequence_length))
+                                bounds=(-self._sequence_length, self._sequence_length))
 
         # decision variables used to linearize access to the pcm matrix
         # l(ijk) = 1 if o(ij)=k, d(jk)=1 if a(j)=k
@@ -668,7 +185,30 @@ class StrobeSpacer:
         self._model.i = aml.Var(self._model.SequencePositions, domain=aml.Reals, initialize=0)
 
         self._logger.debug('Building basic constraints...')
+        self._insert_basic_constraints()
 
+        self._logger.debug('Building sequence constraints...')
+        self._insert_sequence_constraints()
+
+        self._logger.debug('Building array access constraints...')
+        self._insert_cleavage_constraints()
+
+        self._logger.debug('Building custom vaccine constraints...')
+        for constr in self._vaccine_constraints:
+            constr.insert_constraint(self._model)
+
+        self._logger.debug('Building immunogenicity objective...')
+        self._objective_variable = self._vaccine_objective.insert_objective(self._model)
+
+        self._solver = SolverFactory(self._solver_type)
+        self._solver.set_instance(self._model)
+
+        self._built = True
+        self._logger.info('Model built successfully!')
+
+        return self
+
+    def _insert_basic_constraints(self):
         # exactly one epitope per position
         self._model.OneEpitopePerPosition = aml.Constraint(
             self._model.EpitopePositions,
@@ -693,8 +233,15 @@ class StrobeSpacer:
             ) <= 1
         )
 
-        self._logger.debug('Building sequence constraints...')
+        # enforce minimum spacer length
+        self._model.MinSpacerLengthConstraint = aml.Constraint(
+            self._model.SpacerPositions, rule=lambda model, spacer: model.MinSpacerLength <= sum(
+                model.c[(spacer + 1) * (model.EpitopeLength + model.MaxSpacerLength) - i]
+                for i in range(1, model.MaxSpacerLength + 1)
+            )
+        )
 
+    def _insert_sequence_constraints(self):
         # fill in the sequence, in two steps
         # 1. ensure that a(ij) = 1 if aminoacid j is in position i
         def sequence_positive_rule(model, seq_pos, amino):
@@ -736,22 +283,13 @@ class StrobeSpacer:
             self._model.SequencePositions, rule=sequence_negative_rule
         )
 
+    def _insert_cleavage_constraints(self):
         # compute coverage indicators
         self._model.SequenceIndicators = aml.Constraint(
             self._model.SequencePositions, rule=lambda model, pos: model.c[pos] == sum(
                 model.a[pos, a] for a in model.Aminoacids
             )
         )
-
-        # enforce minimum spacer length
-        self._model.MinSpacerLengthConstraint = aml.Constraint(
-            self._model.SpacerPositions, rule=lambda model, spacer: model.MinSpacerLength <= sum(
-                model.c[(spacer + 1) * (model.EpitopeLength + model.MaxSpacerLength) - i]
-                for i in range(1, model.MaxSpacerLength + 1)
-            )
-        )
-
-        self._logger.debug('Building offset constraints...')
 
         # compute offsets
         def offsets_rule(model, dst, src):
@@ -767,20 +305,20 @@ class StrobeSpacer:
             self._model.SequencePositions * self._model.SequencePositions, rule=offsets_rule
         )
 
-        self._logger.debug('Building array access constraints...')
-
         # set d = 1 when o >= -4
-        # FIXME why is there a 5 and not a 4 !?!
-        self._model.OffsetLowerBound = aml.Constraint(
-            self._model.SequencePositions * self._model.SequencePositions,
-            rule=lambda model, p1, p2: -5 >= model.o[p1, p2] - (sequence_length + 5) * model.d[p1, p2]
+        utilities.insert_indicator_sum_beyond_threshold(
+            self._model, self._model.d, None, larger_than_is=1,
+            get_variables_bounds_fn=lambda model, p1, p2: (
+                [model.o[p1, p2]], self._sequence_length + 5, -4.5
+            )
         )
 
         # and set g = 1 when o <= 1
-        # FIXME why is there a 2 and not a 1 !?!
-        self._model.OffsetUpperBound = aml.Constraint(
-            self._model.SequencePositions * self._model.SequencePositions,
-            rule=lambda model, p1, p2: 2 <= model.o[p1, p2] + (sequence_length + 2) * model.g[p1, p2]
+        utilities.insert_indicator_sum_beyond_threshold(
+            self._model, self._model.g, None, larger_than_is=0,
+            get_variables_bounds_fn=lambda model, p1, p2: (
+                [model.o[p1, p2]], self._sequence_length + 2, 1.5
+            )
         )
 
         # force the model to choose one lambda when d = g = 1
@@ -822,21 +360,6 @@ class StrobeSpacer:
                 model.p[pos, j] for j in model.SequencePositions
             )
         )
-
-        self._logger.debug('Building custom vaccine constraints...')
-        for constr in self._vaccine_constraints:
-            constr.insert_constraint(self._model)
-
-        self._logger.debug('Building immunogenicity objective...')
-        self._objective_variable = self._vaccine_objective.insert_objective(self._model)
-
-        self._solver = SolverFactory(self._solver_type)
-        self._solver.set_instance(self._model)
-
-        self._built = True
-        self._logger.info('Model built successfully!')
-
-        return self
 
     def solve(self, options=None, tee=1):
         # if logging is configured, gurobipy will print messages there *and* on stdout

@@ -8,6 +8,7 @@ import sys
 import traceback
 
 import pandas as pd
+import pyomo.environ as aml
 
 from Fred2.Core import Allele, Peptide
 from Fred2.EpitopePrediction import EpitopePredictionResult
@@ -174,3 +175,76 @@ def affinities_from_csv(bindings_file, allele_data=None, peptide_coverage=None):
         df.columns = [Allele(c) for c in df.columns]
 
     return EpitopePredictionResult(df)
+
+
+def insert_indicator_sum_beyond_threshold(model, name, indices, larger_than_is,
+                                          get_variables_bounds_fn, default=None):
+    '''
+    creates a variable of the given name and defined over the given indices (or uses the existing one)
+    that indicates when the sum of certain variables is larger (larger_than_is=1) or smaller (larger_than_is=0)
+    than given threshold, or zero in the opposite case
+
+    get_variables_bound_fn takes as input the model and the indices, and must return a tuple
+    containing (in order):
+        - an iterable of variables to sum over
+        - the upper bound for the sum (not necessarily tight)
+        - the threshold above which the indicator is one
+    '''
+    if isinstance(name, aml.Var):
+        result_var, indices = name, name.index_set()
+        name = result_var.name
+    elif not hasattr(model, name):
+        result_var = aml.Var(indices, domain=aml.Binary, initialize=0)
+        setattr(model, name, result_var)
+    else:
+        result_var = getattr(model, name)
+        indices = result_var.index_set()
+
+    def positive_rule(model, *idx):
+        variables, upper_bound, threshold = get_variables_bounds_fn(model, *idx)
+        if not variables:
+            return result_var[idx] == default
+        elif larger_than_is > 0:
+            return sum(variables) - upper_bound * result_var[idx] <= threshold
+        else:
+            return sum(variables) - upper_bound * (1 - result_var[idx]) <= threshold
+
+    def negative_rule(model, *idx):
+        variables, upper_bound, threshold = get_variables_bounds_fn(model, *idx)
+        if not variables:
+            return result_var[idx] == default
+        elif larger_than_is > 0:
+            return sum(variables) + upper_bound * (1 - result_var[idx]) >= threshold
+        else:
+            return sum(variables) + upper_bound * result_var[idx] >= threshold
+
+    setattr(model, name + 'SetPositive', aml.Constraint(indices, rule=positive_rule))
+    setattr(model, name + 'SetNegative', aml.Constraint(indices, rule=negative_rule))
+
+
+def insert_conjunction_constraints(model, name, indices, get_conjunction_vars_fn, default=1):
+    ''' creates constraints that assign one to a variable if the conjunction of
+        some other variables is true, i.e. y = x1 and x2 and ... and xn
+    '''
+
+    def get_vars_and_bounds(model, *idx):
+        variables = get_conjunction_vars_fn(model, *idx)
+        upper_bound = len(variables) + 1
+        threshold = len(variables) - 0.5
+        return variables, upper_bound, threshold
+
+    insert_indicator_sum_beyond_threshold(model, name, indices, 1, get_vars_and_bounds, default)
+
+
+def insert_disjunction_constraints(model, name, indices, get_conjunction_vars_fn, default=1):
+    ''' creates constraints that assign one to a variable if the disjunction of
+        some other variables is true, i.e. y = x1 or x2 or ... or xn
+    '''
+
+    def get_vars_and_bounds(model, *idx):
+        variables = get_conjunction_vars_fn(model, *idx)
+        upper_bound = len(variables) + 1
+        threshold = 0.5
+        return variables, upper_bound, threshold
+
+    insert_indicator_sum_beyond_threshold(model, name, indices, 1, get_vars_and_bounds, default)

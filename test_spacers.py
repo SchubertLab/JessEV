@@ -1,6 +1,9 @@
+import pyomo.environ as aml
+
+import constraints as ssc
+import objectives as sso
 import strobe_spacers as sspa
 from pcm import DoennesKohlbacherPcm
-import pyomo.environ as aml
 
 
 class BaseTest:
@@ -9,7 +12,7 @@ class BaseTest:
     min_spacer_length = 2
     max_spacer_length = 4
     vaccine_length = 2
-    objective = sspa.ImmunogenicityObjective()
+    objective = sso.ImmunogenicityObjective()
 
     def __init__(self, constraints, correct_immunogen=None, correct_epitopes=None, correct_spacers=None):
         self.constraints = constraints
@@ -64,7 +67,7 @@ def test_n_terminus_cleavage_gap():
     gap = 0.5
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[sspa.MinimumNTerminusCleavageGap(gap)],
+        constraints=[ssc.MinimumNTerminusCleavageGap(gap)],
         correct_immunogen=0.215,
     )
 
@@ -81,7 +84,7 @@ def test_min_cleavage_inside_spacers():
     min_cleavage = 0.5
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[sspa.BoundCleavageInsideSpacers(min_cleavage, None)],
+        constraints=[ssc.BoundCleavageInsideSpacers(min_cleavage, None)],
         correct_immunogen=0.215,
     )
 
@@ -97,7 +100,7 @@ def test_max_cleavage_inside_spacers():
     max_cleavage = 0.2
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[sspa.BoundCleavageInsideSpacers(None, max_cleavage)],
+        constraints=[ssc.BoundCleavageInsideSpacers(None, max_cleavage)],
     )
 
     solution = test.solve_and_check()
@@ -111,7 +114,7 @@ def test_max_cleavage_inside_spacers():
 def test_max_cleavage_inside_epitope():
     max_cleavage = 0.8
     test = BaseTest(
-        constraints=[sspa.MaximumCleavageInsideEpitopes(max_cleavage)],
+        constraints=[ssc.MaximumCleavageInsideEpitopes(max_cleavage)],
         correct_immunogen=0.162,
         correct_epitopes=[3, 2],
         correct_spacers=['CCC']
@@ -127,7 +130,7 @@ def test_n_terminus_cleavage():
     cleavage = 0.5
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[sspa.MinimumNTerminusCleavage(cleavage)],
+        constraints=[ssc.MinimumNTerminusCleavage(cleavage)],
         correct_immunogen=0.215,
     )
 
@@ -142,7 +145,7 @@ def test_c_terminus_cleavage():
     cleavage = 0.5
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[sspa.MinimumCTerminusCleavage(cleavage)],
+        constraints=[ssc.MinimumCTerminusCleavage(cleavage)],
         correct_immunogen=0.215,
     )
 
@@ -162,7 +165,7 @@ def test_coverage():
         [0, 1, 1],
     ]
     test = BaseTest(
-        constraints=[sspa.MinimumCoverageAverageConservation(
+        constraints=[ssc.MinimumCoverageAverageConservation(
             epitope_coverage, min_coverage=3
         )]
     )
@@ -181,7 +184,7 @@ def test_conservation():
     ]
 
     test = BaseTest(
-        constraints=[sspa.MinimumCoverageAverageConservation(
+        constraints=[ssc.MinimumCoverageAverageConservation(
             epitope_coverage, min_conservation=2
         )]
     )
@@ -191,7 +194,7 @@ def test_conservation():
 
 def test_effective_immunogenicity():
     test = BaseTest([])
-    test.objective = sspa.MonteCarloEffectiveImmunogenicityObjective(
+    test.objective = sso.MonteCarloEffectiveImmunogenicityObjective(
         mc_draws=10, cleavage_prior=0.1
     )
 
