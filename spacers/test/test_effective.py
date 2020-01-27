@@ -1,25 +1,27 @@
-import pyomo.environ as aml
 import sys
-print(sys.path)
 
-from spacers.monte_carlo import constraints as ssc
-from spacers.monte_carlo import objectives as sso
-from spacers.model import ModelParams, StrobeSpacer, SolverFailedException
+import pyomo.environ as aml
+
+from spacers import constraints as spco
+from spacers import objectives as spob
+from spacers import utilities
+from spacers.model import ModelParams, SolverFailedException, StrobeSpacer
 from spacers.pcm import DoennesKohlbacherPcm
 from spacers.test.base_test import BaseTest
 
 
 def test_effective_immunogenicity():
     test = BaseTest([])
-    test.objective = sso.MonteCarloEffectiveImmunogenicityObjective(
+    test.objective = spob.EffectiveImmunogenicityObjective(
         mc_draws=10, cleavage_prior=0.1
     )
 
     solution = test.solve_and_check()
-    model = test.problem._implementation._model
+    model = test.problem._model
 
     counts = [0] * len(solution.sequence)
     effective_immunogen = 0.0
+    recovery = []
     for i in range(10):
         # perform simulation using the same random numbers as the milp
         # compute cleavage positions
@@ -46,30 +48,38 @@ def test_effective_immunogenicity():
         assert computed_cuts == cuts
 
         # compute epitope recovery
-        recovery = [1, 1]
+        recovery.append([1, 1])
         for j in range(10):  # check epitope and c-terminus
             if (j < 8 and cuts[j] > 0) or (j == 9 and cuts[j] < 1):
-                recovery[0] = 0
+                recovery[-1][0] = 0
                 break
 
         second_start = 9 + len(solution.spacers[0])
         for j in range(9):
             k = j + second_start
             if (j == 0 and cuts[k] < 1) or (j > 0 and cuts[k] > 0):
-                recovery[1] = 0
+                recovery[-1][1] = 0
                 break
 
-        assert int(aml.value(model.McRecoveredEpitopes[i, 0])) == recovery[0]
-        assert int(aml.value(model.McRecoveredEpitopes[i, 1])) == recovery[1]
+        assert int(aml.value(model.McRecoveredEpitopePositions[i, 0])) == recovery[-1][0]
+        assert int(aml.value(model.McRecoveredEpitopePositions[i, 1])) == recovery[-1][1]
 
-        # compute effective immunogenicity
-        test_immunogen = sum(
-            recovery[i] * test.immunogens[solution.epitopes[i]]
-            for i in range(2)
-        )
-        assert abs(aml.value(model.McEffectiveImmunogen[i]) - test_immunogen) < 1e-6
+    # compute epitope recovery frequencies
+    recovery_freqs = [
+        sum(r[0] for r in recovery) / len(recovery),
+        sum(r[1] for r in recovery) / len(recovery),
+    ]
+    for i in range(len(recovery_freqs)):
+        assert abs(aml.value(model.McRecoveredEpitopesFrequency[i]) - recovery_freqs[i]) < 1e-6
 
-        effective_immunogen += test_immunogen
+    # compute position immunogenicity
+    pos_immunogen = [test.immunogens[e] for e in solution.epitopes]
+    for i in range(len(pos_immunogen)):
+        assert abs(aml.value(model.PositionImmunogenicity[i]) - pos_immunogen[i]) < 1e-6
+
+    # compute effective immunogenicity
+    computed_effective_ig = sum(i * f for i, f in zip(pos_immunogen, recovery_freqs))
+    assert abs(aml.value(model.EffectiveImmunogenicity) - computed_effective_ig) < 1e-6
 
     # now test recovery probabilities
     for i in range(len(solution.sequence)):

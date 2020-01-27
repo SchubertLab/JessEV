@@ -93,6 +93,5 @@ def run_sequential(input_epitopes, input_alleles, input_affinities,
         })
 
 
-
 if __name__ == '__main__':
     main()

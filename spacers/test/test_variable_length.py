@@ -1,10 +1,9 @@
 import sys
-print(sys.path)
 
-from spacers.variable_length import constraints as ssc
-from spacers.variable_length import objectives as sso
-from spacers.variable_length.model import VariableLength
-from spacers.model import ModelParams, StrobeSpacer, SolverFailedException
+from spacers import constraints as spco
+from spacers import objectives as spob
+from spacers import utilities
+from spacers.model import ModelParams, SolverFailedException, StrobeSpacer
 from spacers.pcm import DoennesKohlbacherPcm
 from spacers.test.base_test import BaseTest
 
@@ -13,7 +12,7 @@ def test_n_terminus_cleavage_gap():
     gap = 0.5
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[ssc.MinimumNTerminusCleavageGap(gap)],
+        constraints=[spco.MinimumNTerminusCleavageGap(gap)],
         correct_immunogen=0.215,
     )
 
@@ -30,7 +29,7 @@ def test_min_cleavage_inside_spacers():
     min_cleavage = 0.5
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[ssc.BoundCleavageInsideSpacers(min_cleavage, None)],
+        constraints=[spco.BoundCleavageInsideSpacers(min_cleavage, None)],
         correct_immunogen=0.215,
     )
 
@@ -46,7 +45,7 @@ def test_max_cleavage_inside_spacers():
     max_cleavage = 0.2
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[ssc.BoundCleavageInsideSpacers(None, max_cleavage)],
+        constraints=[spco.BoundCleavageInsideSpacers(None, max_cleavage)],
     )
 
     solution = test.solve_and_check()
@@ -60,10 +59,9 @@ def test_max_cleavage_inside_spacers():
 def test_max_cleavage_inside_epitope():
     max_cleavage = 0.8
     test = BaseTest(
-        constraints=[ssc.MaximumCleavageInsideEpitopes(max_cleavage)],
+        constraints=[spco.MaximumCleavageInsideEpitopes(max_cleavage)],
         correct_immunogen=0.162,
         correct_epitopes=[3, 2],
-        correct_spacers=['CCC']
     )
 
     solution = test.solve_and_check()
@@ -76,7 +74,7 @@ def test_n_terminus_cleavage():
     cleavage = 0.5
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[ssc.MinimumNTerminusCleavage(cleavage)],
+        constraints=[spco.MinimumNTerminusCleavage(cleavage)],
         correct_immunogen=0.215,
     )
 
@@ -91,7 +89,7 @@ def test_c_terminus_cleavage():
     cleavage = 0.5
     # there are several optimal solutions, so we only check the objective
     test = BaseTest(
-        constraints=[ssc.MinimumCTerminusCleavage(cleavage)],
+        constraints=[spco.MinimumCTerminusCleavage(cleavage)],
         correct_immunogen=0.215,
     )
 
@@ -111,7 +109,7 @@ def test_coverage():
         [0, 1, 1],
     ]
     test = BaseTest(
-        constraints=[ssc.MinimumCoverageAverageConservation(
+        constraints=[spco.MinimumCoverageAverageConservation(
             epitope_coverage, min_coverage=3
         )]
     )
@@ -130,7 +128,7 @@ def test_conservation():
     ]
 
     test = BaseTest(
-        constraints=[ssc.MinimumCoverageAverageConservation(
+        constraints=[spco.MinimumCoverageAverageConservation(
             epitope_coverage, min_conservation=2
         )]
     )

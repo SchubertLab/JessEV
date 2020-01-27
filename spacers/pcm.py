@@ -39,7 +39,7 @@ class DoennesKohlbacherPcm:
 
     def get_amino(self, idx):
         return self.AMINOS[idx]
-    
+
     def get_index(self, amino):
         return self.AMINO_IDX[amino]
 
