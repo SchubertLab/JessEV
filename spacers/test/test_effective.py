@@ -20,32 +20,34 @@ def test_effective_immunogenicity():
     model = test.problem._model
 
     counts = [0] * len(solution.sequence)
-    effective_immunogen = 0.0
     recovery = []
     for i in range(10):
         # perform simulation using the same random numbers as the milp
         # compute cleavage positions
-        cuts = []
-        last = -1
-        for p in range(len(solution.sequence)):
-            cleavage = solution.cleavage[p]
-            is_cut = 0
+        cuts, computed_cuts = [], []
+        last, cursor = -1, 0
+        for p in model.SequencePositions:
+            cleavage = aml.value(model.i[p])
+            # check that the Bernoulli trials are correct
             if cleavage >= model.McRandoms[i, p]:
                 assert int(aml.value(model.McBernoulliTrials[i, p])) == 1
-                if p - last > 4:
-                    is_cut = 1
-                    counts[p] += 1
-                    last = p
+                bernoulli = 1
             else:
                 assert int(aml.value(model.McBernoulliTrials[i, p])) == 0
+                bernoulli = 0
+
+            # check that the cleavage scores and indicators match
+            if aml.value(model.c[p]) > 0.9:
+                assert abs(solution.cleavage[cursor] - aml.value(model.i[p])) < 1e-6
+                is_cut = 0
+                if bernoulli and cursor - last > 4:
+                    is_cut = 1
+                    last = cursor
+                    counts[cursor] += 1
+                cursor += 1
 
             cuts.append(is_cut)
-
-        computed_cuts = [
-            int(aml.value(model.McCleavageTrials[i, p]))
-            for p in range(len(solution.sequence))
-        ]
-        assert computed_cuts == cuts
+            assert int(aml.value(model.McCleavageTrials[i, p])) == is_cut
 
         # compute epitope recovery
         recovery.append([1, 1])
@@ -85,5 +87,3 @@ def test_effective_immunogenicity():
     for i in range(len(solution.sequence)):
         computed = aml.value(model.McCleavageProbs[i])
         assert abs(counts[i] / 10 - computed) < 1e-6
-
-    assert abs(solution.immunogen - effective_immunogen / 10) < 1e-6
