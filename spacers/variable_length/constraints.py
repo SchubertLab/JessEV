@@ -1,20 +1,18 @@
 import math
 from abc import ABC, abstractmethod
+from spacers.model import VaccineConstraint
 
 import pyomo.environ as aml
 
 
-class VaccineConstraints(ABC):
-    ''' base class for adding constraints to the milp model
+class VariableLengthVaccineConstraint(VaccineConstraint):
     '''
-
-    @abstractmethod
-    def insert_constraint(self, model):
-        ''' simply modify the model as appropriate
-        '''
+    base class for constraints that only apply to the variable length implementation
+    '''
+    pass
 
 
-class MinimumNTerminusCleavageGap(VaccineConstraints):
+class MinimumNTerminusCleavageGap(VariableLengthVaccineConstraint):
     ''' enforces a given minimum cleavage gap between the first position of an epitope
         (which indicates correct cleavage at the end of the preceding spacer)
         and the cleavage of surrounding amino acids (next one and previous four)
@@ -59,7 +57,7 @@ class MinimumNTerminusCleavageGap(VaccineConstraints):
         )
 
 
-class BoundCleavageInsideSpacers(VaccineConstraints):
+class BoundCleavageInsideSpacers(VariableLengthVaccineConstraint):
     ''' enforces a given minimum/maximum cleavage likelihood inside every spacer
         use None to disable the corresponding constraint
     '''
@@ -98,7 +96,7 @@ class BoundCleavageInsideSpacers(VaccineConstraints):
         )
 
 
-class MaximumCleavageInsideEpitopes(VaccineConstraints):
+class MaximumCleavageInsideEpitopes(VariableLengthVaccineConstraint):
     ''' enforces a given maximum cleavage inside the epitopes
         possibly ignoring the first few amino acids
 
@@ -130,7 +128,7 @@ class MaximumCleavageInsideEpitopes(VaccineConstraints):
         )
 
 
-class MinimumNTerminusCleavage(VaccineConstraints):
+class MinimumNTerminusCleavage(VariableLengthVaccineConstraint):
     ''' enforces a given minimum cleavage at the first position of an epitope
         (which indicates correct cleavage at the end of the preceding spacer)
 
@@ -159,7 +157,7 @@ class MinimumNTerminusCleavage(VaccineConstraints):
             return aml.Constraint.Satisfied
 
 
-class MinimumCTerminusCleavage(VaccineConstraints):
+class MinimumCTerminusCleavage(VariableLengthVaccineConstraint):
     ''' enforces a minimum cleavage score at the first position of every spacer
     '''
 
@@ -178,7 +176,7 @@ class MinimumCTerminusCleavage(VaccineConstraints):
         return model.i[spacer_start] >= model.MinCtCleavage
 
 
-class MinimumCoverageAverageConservation(VaccineConstraints):
+class MinimumCoverageAverageConservation(VariableLengthVaccineConstraint):
     ''' enforces minimum coverage and/or average epitope conservation
         with respect to a given set of options (i.e., which epitope covers which options)
     '''
@@ -238,3 +236,26 @@ class MinimumCoverageAverageConservation(VaccineConstraints):
         for k, v in cs.items():
             name = '%s_%s' % (self._name, k)
             setattr(model, name, v)
+
+
+class MinimumSpacerLength(VariableLengthVaccineConstraint):
+    '''
+    enforces a given minimum spacer length
+    '''
+
+    def __init__(self, min_spacer_length):
+        if min_spacer_length < 0:
+            raise ValueError('The minimum spacer length must be positive')
+
+        self._min_spacer_length = min_spacer_length
+
+    def insert_constraint(self, model):
+        model.MinSpacerLength = aml.Param(initialize=self._min_spacer_length)
+
+        # enforce minimum spacer length
+        model.MinSpacerLengthConstraint = aml.Constraint(
+            model.SpacerPositions, rule=lambda model, spacer: model.MinSpacerLength <= sum(
+                model.c[(spacer + 1) * (model.EpitopeLength + model.MaxSpacerLength) - i]
+                for i in range(1, model.MaxSpacerLength + 1)
+            )
+        )

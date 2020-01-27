@@ -2,36 +2,22 @@ import math
 import random
 from abc import ABC, abstractmethod
 
+from spacers.model import (insert_indicator_sum_beyond_threshold,
+                           insert_disjunction_constraints,
+                           insert_conjunction_constraints)
 import pyomo.environ as aml
 
-import utilities
+from spacers import utilities
+from spacers.model import VaccineObjective
 
 
-class VaccineObjective(ABC):
-    ''' base class for the milp objective
+class MonteCarloVaccineObjective(VaccineObjective):
+    '''
+    base class for objectives applied to the Monte Carlo model
     '''
 
-    @abstractmethod
-    def insert_objective(self, model):
-        ''' insert the objective in the model
-        '''
 
-
-class ImmunogenicityObjective(VaccineObjective):
-    ''' this objective maximizes the sum of the immunogenicities of the selected epitopes
-    '''
-
-    def insert_objective(self, model):
-        model.Immunogenicity = aml.Var()
-        model.AssignImmunogenicity = aml.Constraint(rule=lambda model: model.Immunogenicity == sum(
-            model.x[i, j] * model.EpitopeImmunogen[i] for i in model.Epitopes for j in model.EpitopePositions
-        ))
-
-        model.Objective = aml.Objective(rule=lambda model: model.Immunogenicity, sense=aml.maximize)
-        return model.Objective
-
-
-class MonteCarloEffectiveImmunogenicityObjective(VaccineObjective):
+class MonteCarloEffectiveImmunogenicityObjective(MonteCarloVaccineObjective):
     '''
     this objective estimates the effective immunogenicity based on the epitopes
     that are cleaved correctly. this latter part is estimated using monte-carlo
@@ -41,6 +27,8 @@ class MonteCarloEffectiveImmunogenicityObjective(VaccineObjective):
 
     def __init__(self, mc_draws=100, cleavage_prior=0.1):
         self._mc_draws = mc_draws
+        if cleavage_prior < 0 or cleavage_prior > 1:
+            raise ValueError('cleavage prior must be between 0 and 1')
         self._cleavage_prior = math.log(cleavage_prior)
 
     def _compute_bernoulli_trials(self, model):
@@ -50,7 +38,7 @@ class MonteCarloEffectiveImmunogenicityObjective(VaccineObjective):
 
         # a Bernoulli trial in position p successful if the cleavage score
         # is larger than the random number at position p
-        utilities.insert_indicator_sum_beyond_threshold(
+        insert_indicator_sum_beyond_threshold(
             model, 'McBernoulliTrials',
             model.McDrawIndices * model.SequencePositions,
             larger_than_is=1,
@@ -75,7 +63,7 @@ class MonteCarloEffectiveImmunogenicityObjective(VaccineObjective):
         #  - it is further than 4 amino acids, or
         #  - it does not contain an amino acid, or
         #  - it was not cleaved.
-        utilities.insert_disjunction_constraints(
+        insert_disjunction_constraints(
             model, 'McCleavageNotBlocked',
             model.McDrawIndices * model.SequencePositions * model.SequencePositions,
             lambda model, i, p, k: [
@@ -102,7 +90,7 @@ class MonteCarloEffectiveImmunogenicityObjective(VaccineObjective):
                 ]
             return variables
 
-        utilities.insert_conjunction_constraints(
+        insert_conjunction_constraints(
             model, model.McCleavageTrials, None,
             get_vars_cleavage_trials, default=0
         )
@@ -147,7 +135,7 @@ class MonteCarloEffectiveImmunogenicityObjective(VaccineObjective):
                     model.McCleavageTrials[i, nterminus_position],
                 ]
 
-        utilities.insert_conjunction_constraints(
+        insert_conjunction_constraints(
             model, 'McRecoveredEpitopes',
             model.McDrawIndices * model.EpitopePositions,
             get_conj_vars,
