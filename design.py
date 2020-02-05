@@ -42,8 +42,8 @@ def design(epitope_data, min_spacer_length, max_spacer_length, num_epitopes, con
 @click.option('--top-immunogen', help='Only consider the top epitopes by immunogenicity', type=float)
 @click.option('--top-proteins', help='Only consider the top epitopes by protein coverage', type=float)
 @click.option('--top-alleles', help='Only consider the top epitopes by allele coverage', type=float)
-@click.option('--min-alleles', help='Vaccine must cover at least this many alleles')
-@click.option('--min-proteins', help='Vaccine must cover at least this many proteins')
+@click.option('--min-alleles', help='Vaccine must cover at least this many alleles', type=float)
+@click.option('--min-proteins', help='Vaccine must cover at least this many proteins', type=float)
 @click.option('--min-avg-prot-conservation', type=float,
               help='On average, epitopes in the vaccine must cover at least this many proteins')
 @click.option('--min-avg-alle-conservation', type=float,
@@ -55,7 +55,7 @@ def design(epitope_data, min_spacer_length, max_spacer_length, num_epitopes, con
 @click.option('--min-spacer-cleavage', '-c', help='Minimum cleavage inside the spacers', type=float)
 @click.option('--max-spacer-cleavage', '-C', help='Maximum cleavage inside the spacers', type=float)
 @click.option('--max-epitope-cleavage', '-E', help='Maximum cleavage inside epitopes', type=float)
-@click.option('--epitope-cleavage-ignore-first', '-i', type=int,
+@click.option('--epitope-cleavage-ignore-first', '-i', type=int, default=1,
               help='Ignore first amino acids for epitope cleavage')
 # immunogenicity computation options
 @click.option('--monte-carlo-trials', '-mct', type=int, default=100,
