@@ -211,38 +211,39 @@ class VariableLengthMinimumNTerminusCleavageGap(VaccineConstraint):
         self._min_gap = min_gap
 
     @staticmethod
-    def _assign_mask(model, epi, pos):
+    def _assign_mask(model, epi, off):
         if epi > 0:
             epi_start = epi * (model.MaxSpacerLength + model.EpitopeLength)
-            return model.NTerminusMask[epi, pos] == model.d[epi_start, pos] * model.g[epi_start, pos]
+            return model.NTerminusMask[epi, off] == model.d[epi_start, off] * model.g[epi_start, off]
         else:
             return aml.Constraint.Satisfied
 
     @staticmethod
-    def _constraint_rule(model, epi, pos):
+    def _constraint_rule(model, epi, offs):
         epi_start = epi * (model.MaxSpacerLength + model.EpitopeLength)
-        if epi > 0 and pos != epi_start:
+        if epi > 0 and offs != 0:
             # remove a large constant when c[pos] = 0 to satisfy the constraint
             # when this position is empty
             return (
-                model.i[epi_start] * model.NTerminusMask[epi, pos]
+                model.i[epi_start] * model.NTerminusMask[epi, offs]
             ) >= (
-                model.i[pos] + model.MinCleavageGap
-            ) * model.NTerminusMask[epi, pos] - 50 * (1 - model.c[pos])
+                model.i[epi_start + offs] + model.MinCleavageGap
+            ) * model.NTerminusMask[epi, offs] - 50 * (1 - model.c[epi_start + offs])
         else:
             return aml.Constraint.Satisfied
 
     def insert_constraint(self, model):
         model.MinCleavageGap = aml.Param(initialize=self._min_gap)
+
         model.NTerminusMask = aml.Var(
-            model.EpitopePositions * model.SequencePositions,
+            model.EpitopePositions * model.OffsetAround,
             domain=aml.Binary, initialize=0
         )
         model.AssignNTerminusMask = aml.Constraint(
-            model.EpitopePositions * model.SequencePositions, rule=self._assign_mask
+            model.EpitopePositions * model.OffsetAround, rule=self._assign_mask
         )
         model.MinCleavageGapConstraint = aml.Constraint(
-            model.EpitopePositions * model.SequencePositions, rule=self._constraint_rule
+            model.EpitopePositions * model.OffsetAround, rule=self._constraint_rule
         )
 
 

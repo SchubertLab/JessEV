@@ -108,20 +108,20 @@ class EffectiveImmunogenicityObjective(VaccineObjective):
         model.McCleavageTrials = aml.Var(model.McDrawIndices * model.SequencePositions,
                                          domain=aml.Binary, initialize=0)
 
-        # this variable indicates whether position k is not blocking cleavage at position p
-        # k does not block p iff
+        # this variable indicates whether position p+k is not blocking cleavage at position p
+        # p+k does not block p iff
         #  - it is further than 4 amino acids, or
         #  - it does not contain an amino acid, or
         #  - it was not cleaved.
         # (easier to understand its negation via de morgan)
         insert_disjunction_constraints(
             model, 'McCleavageNotBlocked',
-            model.McDrawIndices * model.SequencePositions * model.SequencePositions,
+            model.McDrawIndices * model.SequencePositions * model.OffsetAround,
             lambda model, i, p, k: [
                 1 - model.d[p, k],
-                1 - model.c[k],
-                1 - model.McCleavageTrials[i, k],
-            ] if k < p else [],
+                1 - model.c[p+k],
+                1 - model.McCleavageTrials[i, p+k],
+            ] if k < 0 and k + p >= 0 else [],
             default=1.0
         )
 
@@ -137,8 +137,9 @@ class EffectiveImmunogenicityObjective(VaccineObjective):
                     model.c[p],
                     model.McBernoulliTrials[i, p],
                 ] + [
-                    model.McCleavageNotBlocked[i, p, j]
-                    for j in range(0, p)
+                    model.McCleavageNotBlocked[i, p, o]
+                    for o in model.OffsetAround
+                    if o < 0
                 ]
             return variables
 

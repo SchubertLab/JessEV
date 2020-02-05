@@ -24,7 +24,7 @@ def test_effective_immunogenicity():
     for i in range(10):
         # perform simulation using the same random numbers as the milp
         # compute cleavage positions
-        cuts, computed_cuts = [], []
+        cuts = []
         last, cursor = -1, 0
         for p in model.SequencePositions:
             cleavage = aml.value(model.i[p])

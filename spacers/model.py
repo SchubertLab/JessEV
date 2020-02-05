@@ -327,27 +327,29 @@ class StrobeSpacer:
         # c(i) indicates whether there is an aminoacid at position i
         model.c = aml.Var(model.SequencePositions, domain=aml.Binary, initialize=0)
 
-        # o(ij) counts how many aminoacids are selected between position i and position j
-        # o(ij) < 0 <=> j < i and 0 when i = j. it counts the amino acid in position j, not the one in position i
-        model.o = aml.Var(model.SequencePositions * model.SequencePositions,
-                          bounds=(-model.SequenceLength, model.SequenceLength))
+        # o(ij) counts how many amino acids are selected between position i (not counted) and i+j (counted)
+        # where j goes from -4-max_spacer_length to 1+max_spacer_length
+        # negative when j < 0 and 0 when j = 0
+        model.OffsetAround = aml.RangeSet(-4 - model.MaxSpacerLength, model.MaxSpacerLength + 1)
+        model.o = aml.Var(model.SequencePositions * model.OffsetAround,
+                          bounds=(-4 - model.MaxSpacerLength, 1 + model.MaxSpacerLength))
 
         # decision variables used to linearize access to the pcm matrix
         # l(ijk) = 1 if o(ij)=k, d(jk)=1 if a(j)=k
         # l0(ij) = 1 if o(ij) is out of bounds, similarly for d0(j)
-        model.l = aml.Var(model.SequencePositions * model.SequencePositions * model.PcmIdx,
-                          domain=aml.Binary)
-        model.l0 = aml.Var(model.SequencePositions * model.SequencePositions, domain=aml.Binary)
+        model.l = aml.Var(model.SequencePositions * model.OffsetAround * model.PcmIdx, domain=aml.Binary)
+        model.l0 = aml.Var(model.SequencePositions * model.OffsetAround, domain=aml.Binary)
 
         # these variables are used to decide whether an offset is within the bounds of the pcm indices
         # and to force the corresponding lambda variable to be 1
         # d(ij) = 1 if o(ij) >= -4 and g(ij) = 1 if o(ij) < 2
-        model.d = aml.Var(model.SequencePositions * model.SequencePositions, domain=aml.Binary)
-        model.g = aml.Var(model.SequencePositions * model.SequencePositions, domain=aml.Binary)
+        model.d = aml.Var(model.SequencePositions * model.OffsetAround, domain=aml.Binary)
+        model.g = aml.Var(model.SequencePositions * model.OffsetAround, domain=aml.Binary)
 
         # p(ijk) has the content of the pssm matrix when the aminoacid in position i is k, and the offset is o[j]
         # or zero if j is out of bounds
-        model.p = aml.Var(model.SequencePositions * model.SequencePositions, bounds=(
+        # so-called "cleavage contributions"
+        model.p = aml.Var(model.SequencePositions * model.OffsetAround, bounds=(
             min(x for row in params.pcm_matrix for x in row),
             max(x for row in params.pcm_matrix for x in row),
         ))
@@ -360,17 +362,20 @@ class StrobeSpacer:
         )
 
         # compute offsets
-        def offsets_rule(model, dst, src):
-            # aminoacid at src is counted, aminoacid at dst is not counted
-            if src < dst:
-                return model.o[dst, src] == -sum(model.c[p] for p in range(src, dst))
-            elif src > dst:
-                return model.o[dst, src] == sum(model.c[p] for p in range(dst + 1, src + 1))
+        def offsets_rule(model, dst, offs):
+            if offs < 0:
+                return model.o[dst, offs] == -sum(
+                    model.c[p] for p in range(max(0, dst + offs), dst)
+                )
+            elif offs > 0:
+                return model.o[dst, offs] == sum(
+                    model.c[p] for p in range(dst + 1, min(aml.value(model.SequenceLength), dst + offs) + 1)
+                )
             else:
-                return model.o[dst, src] == 0
+                return model.o[dst, offs] == 0
 
-        model.Offsets = aml.Constraint(
-            model.SequencePositions * model.SequencePositions, rule=offsets_rule
+        model.ComputeOffsets = aml.Constraint(
+            model.SequencePositions * model.OffsetAround, rule=offsets_rule
         )
 
         # set d = 1 when o >= -4
@@ -391,7 +396,7 @@ class StrobeSpacer:
 
         # force the model to choose one lambda when d = g = 1
         model.ChooseOneLambda = aml.Constraint(
-            model.SequencePositions * model.SequencePositions,
+            model.SequencePositions * model.OffsetAround,
             rule=lambda model, p1, p2: sum(
                 model.l[p1, p2, k] for k in model.PcmIdx
             ) == model.d[p1, p2] * model.g[p1, p2]
@@ -399,13 +404,13 @@ class StrobeSpacer:
 
         # and to choose lambda0 when d = 0 or g = 0
         model.LambdaOrLambdaZero = aml.Constraint(
-            model.SequencePositions * model.SequencePositions,
+            model.SequencePositions * model.OffsetAround,
             rule=lambda model, p1, p2: model.l0[p1, p2] == 1 - model.d[p1, p2] * model.g[p1, p2]
         )
 
         # now select the lambda corresponding to the offset if necessary
         model.ReconstructOffset = aml.Constraint(
-            model.SequencePositions * model.SequencePositions,
+            model.SequencePositions * model.OffsetAround,
             rule=lambda model, p1, p2: sum(
                 model.l[p1, p2, i] * i for i in model.PcmIdx
             ) + model.o[p1, p2] * model.l0[p1, p2] == model.o[p1, p2]
@@ -413,11 +418,12 @@ class StrobeSpacer:
 
         # read cleavage value from the pcm matrix
         model.AssignP = aml.Constraint(
-            model.SequencePositions * model.SequencePositions,
+            model.SequencePositions * model.OffsetAround,
             rule=lambda model, p1, p2: model.p[p1, p2] == sum(
-                model.PssmMatrix[k, i] * model.a[p2, k] * model.l[p1, p2, i]
+                model.PssmMatrix[k, i] * model.a[p1 + p2, k] * model.l[p1, p2, i]
                 for i in model.PcmIdx
                 for k in model.Aminoacids
+                if 0 <= p1 + p2 <= aml.value(model.SequenceLength)
             )
         )
 
@@ -425,7 +431,7 @@ class StrobeSpacer:
         model.ComputeCleavage = aml.Constraint(
             model.SequencePositions,
             rule=lambda model, pos: model.i[pos] == model.c[pos] * sum(
-                model.p[pos, j] for j in model.SequencePositions
+                model.p[pos, j] for j in model.OffsetAround
             )
         )
 
