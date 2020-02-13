@@ -112,20 +112,25 @@ class MinimumCoverageAverageConservation(VaccineConstraint):
         cs = {}  # we create components here, then insert them with the prefixed name
 
         cs['Options'] = aml.RangeSet(0, len(self._epitope_coverage[0]) - 1)
-        cs['Coverage'] = aml.Param(model.Epitopes * cs['Options'],
-                                   initialize=lambda _, e, o: self._epitope_coverage[e][o])
+
+        # for every option, indicates which epitopes cover it
+        # FIXME terrible for caching as we iterate over columns
+        cs['Coverage'] = aml.Param(cs['Options'], initialize=lambda _, o: set(
+            i for i, epi_cov in enumerate(self._epitope_coverage) if epi_cov[o]
+        ))
 
         if self._min_coverage is not None:
             cs['IsOptionCovered'] = aml.Var(cs['Options'], domain=aml.Binary, initialize=0)
             cs['AssignIsOptionCovered'] = aml.Constraint(
                 cs['Options'], rule=lambda model, option: sum(
-                    model.x[e, p] * cs['Coverage'][e, option]
-                    for e in model.Epitopes for p in model.EpitopePositions
+                    model.x[e, p]
+                    for e in cs['Coverage'][option]
+                    for p in model.EpitopePositions
                 ) >= cs['IsOptionCovered'][option]
             )
 
             cs['MinCoverage'] = aml.Param(initialize=(
-                self._min_coverage if isinstance(self._min_coverage, int)
+                int(self._min_coverage) if self._min_coverage > 1
                 else math.ceil(self._min_coverage * len(self._epitope_coverage[0]))
             ))
 
@@ -135,16 +140,16 @@ class MinimumCoverageAverageConservation(VaccineConstraint):
 
         if self._min_conservation is not None:
             cs['MinConservation'] = aml.Param(initialize=(
-                self._min_conservation if isinstance(self._min_conservation, int)
+                int(self._min_conservation) if self._min_conservation > 1
                 else math.ceil(self._min_conservation * len(self._epitope_coverage[0]))
             ))
 
             cs['MinConservationConstraint'] = aml.Constraint(rule=lambda model: sum(
-                model.x[e, p] * (
-                    sum(cs['Coverage'][e, o] for o in cs['Options']) - cs['MinConservation']
-                )
-                for e in model.Epitopes for p in model.EpitopePositions
-            ) >= 0)
+                model.x[e, p]
+                for o in cs['Options']
+                for e in cs['Coverage'][o]
+                for p in model.EpitopePositions
+            ) >= cs['MinConservation'] * model.VaccineLength)
 
         for k, v in cs.items():
             name = '%s_%s' % (self._name, k)
