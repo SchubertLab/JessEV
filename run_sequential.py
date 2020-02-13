@@ -2,8 +2,7 @@ import csv
 
 import click
 
-import pcm
-import utilities
+from spacers import pcm, utilities
 from Fred2.CleavagePrediction.PSSM import PCM
 from Fred2.Core import Allele, Protein
 from Fred2.Core.Peptide import Peptide
@@ -24,8 +23,8 @@ LOGGER = None
 @click.option('--min-spacer-length', '-s', default=0, help='Minimum length of the spacer to be designed')
 @click.option('--num-epitopes', '-e', default=2, help='Number of epitopes in the vaccine')
 # selection constraints
-@click.option('--min-alleles', help='Vaccine must cover at least this many alleles')
-@click.option('--min-proteins', help='Vaccine must cover at least this many proteins')
+@click.option('--min-alleles', help='Vaccine must cover at least this many alleles', type=float)
+@click.option('--min-proteins', help='Vaccine must cover at least this many proteins', type=float)
 # logging
 @click.option('--log-file', type=click.Path(), help='Where to save the logs')
 @click.option('--verbose', is_flag=True, help='Print debug messages')
