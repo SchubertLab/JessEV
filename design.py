@@ -4,12 +4,14 @@ import logging
 import click
 
 from spacers import constraints as spco
+from spacers.pcm import DoennesKohlbacherPcm
 from spacers import objectives as spob
 from spacers import utilities
 from spacers.model import ModelParams, SolverFailedException, StrobeSpacer
 
 
-def design(epitope_data, min_spacer_length, max_spacer_length, num_epitopes, constraints, objective):
+def design(epitope_data, min_spacer_length, max_spacer_length, num_epitopes,
+           constraints, objective, pcm=None):
     epitopes = list(epitope_data.keys())
     immunogens = [epitope_data[e]['immunogen'] for e in epitopes]
 
@@ -19,6 +21,7 @@ def design(epitope_data, min_spacer_length, max_spacer_length, num_epitopes, con
         min_spacer_length=min_spacer_length,
         max_spacer_length=max_spacer_length,
         vaccine_length=num_epitopes,
+        pcm=pcm,
     )
 
     problem = StrobeSpacer(
@@ -72,15 +75,22 @@ def main(ctx=None, **kwargs):
     utilities.main_dispatcher(design_cli, LOGGER, ctx, kwargs)
 
 
-def design_cli(
-        immunogenicity_computation, input_epitopes, output_vaccine, max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
-        top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage, max_epitope_cleavage,
-        min_nterminus_cleavage, epitope_cleavage_ignore_first, max_spacer_cleavage, min_alleles,
-        min_proteins, min_avg_prot_conservation, min_avg_alle_conservation, min_cterminus_cleavage,
-        monte_carlo_trials, prior_cleavage_probability,
-        **kwargs
-):
+def design_cli(immunogenicity_computation, input_epitopes, output_vaccine,
+               max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
+               top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage,
+               max_epitope_cleavage, min_nterminus_cleavage,
+               epitope_cleavage_ignore_first, max_spacer_cleavage, min_alleles,
+               min_proteins, min_avg_prot_conservation, min_avg_alle_conservation,
+               min_cterminus_cleavage, monte_carlo_trials, prior_cleavage_probability,
+               **kwargs):
+
     epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
+
+    # discard epitopes containing invalid amino acids
+    pcm = DoennesKohlbacherPcm()
+    valid_epitopes = [epi for epi in epitope_data if all(a in pcm.AMINOS for a in epi)]
+    epitope_data = {e: epitope_data[e] for e in valid_epitopes}
+    LOGGER.info(f'Loaded {len(epitope_data)} epitopes')
 
     if immunogenicity_computation == 'simple':
         objective = spob.SimpleImmunogenicityObjective()
@@ -101,7 +111,7 @@ def design_cli(
 
     if max_epitope_cleavage is not None:
         constraints.append(spco.MaximumCleavageInsideEpitopes(
-            max_epitope_cleavage, epitope_cleavage_ignore_first or 0))
+            max_epitope_cleavage, epitope_cleavage_ignore_first or 1))
 
     if min_nterminus_cleavage is not None:
         constraints.append(spco.MinimumNTerminusCleavage(min_nterminus_cleavage))
@@ -122,7 +132,8 @@ def design_cli(
         ))
 
     try:
-        solution = design(epitope_data, min_spacer_length, max_spacer_length, num_epitopes, constraints, objective)
+        solution = design(epitope_data, min_spacer_length, max_spacer_length,
+                          num_epitopes, constraints, objective, pcm)
     except SolverFailedException as exc:
         LOGGER.error('Could not solve the problem: %s', exc.condition)
         return False, str(exc.condition)

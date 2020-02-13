@@ -99,16 +99,8 @@ class ModelParams:
         self.min_spacer_length = min_spacer_length
         self.max_spacer_length = max_spacer_length
         self.vaccine_length = vaccine_length
-
-        self.all_epitopes, self.epitope_immunogen = [], []
-        for epi, imm in zip(all_epitopes, epitope_immunogen):
-            try:
-                self.all_epitopes.append([self.pcm.get_index(a) for a in epi])
-            except KeyError:
-                continue
-            else:
-                self.epitope_immunogen.append(imm)
-
+        self.all_epitopes = [[self.pcm.get_index(a) for a in e] for e in all_epitopes]
+        self.epitope_immunogen = epitope_immunogen
         self.epitope_length = len(self.all_epitopes[0])
         self.pcm_matrix = self._fetch_pcm_matrix()
         self.built = False
