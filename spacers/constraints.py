@@ -701,3 +701,58 @@ class MonteCarloRecoveryEstimation(VaccineConstraint):
 
     def update(self, model, solver):
         raise NotImplementedError('better to remove this and create new ones')
+
+
+class MinimumEffectiveConservation(VaccineConstraint):
+    # depends on the monte carlo stuff and the normal conservation (must have same name)
+    # FIXME is there a better way of handling these dependencies on the same data structures?
+
+    def __init__(self, min_conservation, name):
+        self._min_conservation = min_conservation
+        self._name = name
+
+    def insert_constraint(self, model, solver):
+        self._compute_effective_conservation(model)
+        super().insert_constraint(model, solver)
+
+    def _compute_effective_conservation(self, model):
+        cs = {}
+
+        # compute number of options covered in each position
+        cs['PositionConservation'] = aml.Var(model.EpitopePositions, domain=aml.NonNegativeReals)
+        cs['AssignPositionConservation'] = aml.Constraint(
+            model.EpitopePositions, rule=lambda model, p: cs['PositionConservation'][p] == sum(
+                model.x[e, p]
+                for o in getattr(model, f'{self._name}_Options')
+                for e in getattr(model, f'{self._name}_Coverage')[o]
+            )
+        )
+
+        # compute effective conservation
+        options_count = len(getattr(model, f'{self._name}_Options'))
+        cs['EffectiveConservation'] = aml.Var(domain=aml.NonNegativeReals)
+        cs['AssignEffectiveConservation'] = aml.Constraint(rule=lambda model: cs['EffectiveConservation'] == sum(
+            cs['PositionConservation'][p] * model.McRecoveredEpitopesFrequency[p]
+            for p in model.EpitopePositions
+        ) / (model.VaccineLength * options_count))
+
+        # enforce lower bound
+        cs['MinEffectiveConservation'] = aml.Param(initialize=self._min_conservation, mutable=True)
+        cs['EnforceMinEffectiveConservation'] = aml.Constraint(rule=lambda model: (
+            cs['EffectiveConservation'] >= cs['MinEffectiveConservation']
+        ))
+
+        for k, v in cs.items():
+            name = '%s_Effective_%s' % (self._name, k)
+            setattr(model, name, v)
+            if isinstance(v, aml.Constraint):
+                self._constraint_names.append(name)
+            elif isinstance(v, aml.Var):
+                self._variable_names.append(name)
+
+        self._cs = cs
+
+    def update(self, min_conservation):
+        self._min_conservation = min_conservation
+        self._cs['MinEffectiveConservation'].set_value(min_conservation)
+        super().update()
