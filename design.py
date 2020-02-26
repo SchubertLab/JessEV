@@ -4,10 +4,10 @@ import logging
 import click
 
 from spacers import constraints as spco
-from spacers.pcm import DoennesKohlbacherPcm
 from spacers import objectives as spob
 from spacers import utilities
 from spacers.model import ModelParams, SolverFailedException, StrobeSpacer
+from spacers.pcm import DoennesKohlbacherPcm
 
 
 def design(epitope_data, min_spacer_length, max_spacer_length, num_epitopes,

@@ -11,21 +11,23 @@ from spacers.test.base_test import BaseTest
 
 
 def test_effective_immunogenicity():
-    test = BaseTest([])
-    test.objective = spob.EffectiveImmunogenicityObjective(
-        mc_draws=10, cleavage_prior=0.1
-    )
+    mc_draws = 10
+    test = BaseTest([
+        spco.MonteCarloRecoveryEstimation(mc_draws, 0.1)
+    ])
+    test.max_spacer_length = 5
+    test.objective = spob.EffectiveImmunogenicityObjective()
 
     solution = test.solve_and_check()
     model = test.problem._model
 
-    counts = [0] * len(solution.sequence)
+    counts = [0] * aml.value(model.SequenceLength + 1)
     recovery = []
-    for i in range(10):
+    for i in range(mc_draws):
         # perform simulation using the same random numbers as the milp
         # compute cleavage positions
         cuts = []
-        last, cursor = -1, 0
+        last, cursor = 0, 0
         for p in model.SequencePositions:
             cleavage = aml.value(model.i[p])
             # check that the Bernoulli trials are correct
@@ -37,16 +39,16 @@ def test_effective_immunogenicity():
                 bernoulli = 0
 
             # check that the cleavage scores and indicators match
+            is_cut = 0
             if aml.value(model.c[p]) > 0.9:
                 assert abs(solution.cleavage[cursor] - aml.value(model.i[p])) < 1e-6
-                is_cut = 0
-                if bernoulli and cursor - last > 4:
+                if bernoulli and cursor - last > 3:
                     is_cut = 1
                     last = cursor
-                    counts[cursor] += 1
+                    counts[p] += 1
                 cursor += 1
+                cuts.append(is_cut)
 
-            cuts.append(is_cut)
             assert int(aml.value(model.McCleavageTrials[i, p])) == is_cut
 
         # compute epitope recovery
@@ -83,7 +85,9 @@ def test_effective_immunogenicity():
     computed_effective_ig = sum(i * f for i, f in zip(pos_immunogen, recovery_freqs))
     assert abs(aml.value(model.EffectiveImmunogenicity) - computed_effective_ig) < 1e-6
 
-    # now test recovery probabilities
+    assert computed_effective_ig > 0
+
+    # test cleavage probabilities
     for i in range(len(solution.sequence)):
         computed = aml.value(model.McCleavageProbs[i])
-        assert abs(counts[i] / 10 - computed) < 1e-6
+        assert abs(counts[i] / mc_draws - computed) < 1e-6

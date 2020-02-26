@@ -2,13 +2,13 @@ import csv
 
 import click
 
-from spacers import pcm, utilities
 from Fred2.CleavagePrediction.PSSM import PCM
 from Fred2.Core import Allele, Protein
 from Fred2.Core.Peptide import Peptide
 from Fred2.EpitopeAssembly import EpitopeAssembly, EpitopeAssemblyWithSpacer
 from Fred2.EpitopePrediction.PSSM import BIMAS
 from Fred2.EpitopeSelection import OptiTope
+from spacers import pcm, utilities
 
 LOGGER = None
 

@@ -9,6 +9,7 @@ from typing import List
 import pyomo.environ as aml
 import pyomo.kernel as pmo
 from pyomo.opt import SolverFactory, TerminationCondition
+from pyomo.solvers.plugins.solvers.persistent_solver import PersistentSolver
 
 from spacers import utilities
 from spacers.pcm import DoennesKohlbacherPcm
@@ -37,16 +38,137 @@ class VaccineResult:
             writer.writerow(self.to_str_dict())
 
 
+class ModelEditor:
+    '''
+    an utility class that allows constraints and variables to be added and removed
+    so that users do not have to worry whether a persistent solver is used or not
+    '''
+
+    def __init__(self, model, solver, constraints, variables, raise_exceptions=True):
+        self.model = model
+        self.solver = solver
+        self.constraints = constraints
+        self.variables = variables
+        self._raise = raise_exceptions
+
+    def callback_for_each_item(self, items, callback, unpack_indexed):
+        '''
+        calls the given callback for each item in the list, e.g. constraints and variables.
+        optionally "unpacks" indexed constraints/variables by iterating on each of their components.
+        optionally swallows exceptions
+        '''
+        for c in items:
+            if isinstance(c, str):
+                c = getattr(self.model, c)
+
+            if unpack_indexed and hasattr(c, 'is_indexed') and c.is_indexed():
+                for v in c.values():
+                    try:
+                        callback(v)
+                    except:
+                        if self._raise:
+                            raise
+            else:
+                try:
+                    callback(c)
+                except:
+                    if self._raise:
+                        raise
+
+    def remove_constraints(self):
+        if self.solver is not None and isinstance(self.solver, PersistentSolver):
+            self.callback_for_each_item(self.constraints, self.solver.remove_constraint, unpack_indexed=True)
+
+    def remove_variables(self):
+        if self.solver is not None and isinstance(self.solver, PersistentSolver):
+            self.callback_for_each_item(self.variables, self.solver.remove_var, unpack_indexed=True)
+
+    def add_constraints(self):
+        if self.solver is not None and isinstance(self.solver, PersistentSolver):
+            self.callback_for_each_item(self.constraints, self.solver.add_constraint, unpack_indexed=True)
+
+    def add_variables(self):
+        if self.solver is not None and isinstance(self.solver, PersistentSolver):
+            self.callback_for_each_item(self.variables, self.solver.add_var, unpack_indexed=True)
+
+    def activate_constraints(self):
+        self.callback_for_each_item(self.constraints, lambda c: c.activate(), unpack_indexed=False)
+
+    def deactivate_constraints(self):
+        self.callback_for_each_item(self.constraints, lambda c: c.deactivate(), unpack_indexed=False)
+
+    def reconstruct_constraints(self):
+        self.callback_for_each_item(self.constraints, lambda c: c.reconstruct(), unpack_indexed=False)
+
+    def enable(self):
+        '''
+        activates constraints and adds constraints and variables to the solver
+        '''
+        self.add_variables()
+        self.activate_constraints()
+        self.add_constraints()
+
+    def disable(self):
+        '''
+        removes variables and disables/removes constraints
+        '''
+        self.remove_constraints()
+        self.deactivate_constraints()
+        self.remove_variables()
+
+
 class VaccineObjective(ABC):
     '''
     base class for the milp objective
     '''
 
+    _constraint_names = []
+    _variable_names = []
+    _objective_variable = None
+
+    def __init__(self):
+        self._editor = None
+
     @abstractmethod
-    def insert_objective(self, model):
+    def insert_objective(self, model, solver):
         '''
-        insert the objective in the model
+        insert the objective in the model. call super() at the end to automatically initialize
+        a model editor and insert constraints into the persistent solver if necessary
         '''
+
+        self._editor = ModelEditor(model, solver, self._constraint_names, self._variable_names)
+        self._editor.enable()
+        self._model = model
+        self._solver = solver
+
+    def activate(self):
+        '''
+        activate the objective
+        '''
+        self._editor.enable()
+        self._editor.solver.set_objective(self._objective_variable)
+
+    def deactivate(self):
+        '''
+        deactivate the objective
+        '''
+        self._editor.disable()
+
+    @property
+    def solver(self):
+        return self._editor.solver
+
+    @solver.setter
+    def solver(self, solver):
+        self._editor.solver = solver
+
+    @property
+    def model(self):
+        return self._editor.model
+
+    @model.setter
+    def model(self, model):
+        self._editor.model = model
 
 
 class VaccineConstraint(ABC):
@@ -54,11 +176,61 @@ class VaccineConstraint(ABC):
     base class for adding constraints to the milp model
     '''
 
+    _constraint_names = []
+    _variable_names = []
+
     @abstractmethod
-    def insert_constraint(self, model):
+    def insert_constraint(self, model, solver):
         '''
-        simply modify the model as appropriate
+        insert the constraints in the model. call super() at the end to automatically initialize
+        a model editor and insert constraints into the persistent solver if necessary
         '''
+
+        self._editor = ModelEditor(model, solver, self._constraint_names, self._variable_names,
+                                   raise_exceptions=False)
+        self._editor.add_variables()
+        self._editor.add_constraints()
+        self._model = model
+        self._solver = solver
+
+    @abstractmethod
+    def update(self, **kwargs):
+        '''
+        update the parameters of the given constraints. call super() at the end to automatically
+        update the constraints in a persistent solver
+        '''
+
+        self._editor.remove_constraints()
+        self._editor.reconstruct_constraints()
+        self._editor.add_constraints()
+
+    def activate(self):
+        '''
+        activate the constraints
+        '''
+        self._editor.enable()
+
+    def deactivate(self):
+        '''
+        deactivate the constraints
+        '''
+        self._editor.disable()
+
+    @property
+    def solver(self):
+        return self._editor.solver
+
+    @solver.setter
+    def solver(self, solver):
+        self._editor.solver = solver
+
+    @property
+    def model(self):
+        return self._editor.model
+
+    @model.setter
+    def model(self, model):
+        self._editor.model = model
 
 
 class SolverFailedException(Exception):
@@ -151,7 +323,49 @@ class StrobeSpacer:
         self._logger.info('Building model...')
         model = aml.ConcreteModel()
 
-        self._logger.debug('Building model objects and parameters...')
+        # base linear program
+        self._logger.debug('Building model objects...')
+        self._build_model_objects(model)
+
+        self._logger.debug('Building basic constraints...')
+        self._insert_basic_constraints(model)
+
+        self._logger.debug('Building sequence constraints...')
+        self._insert_sequence_constraints(model)
+
+        self._logger.debug('Building cleavage computation constraints...')
+        if self._params.min_spacer_length == self._params.max_spacer_length:
+            self._insert_cleavage_constraints_fixed_spacer_length(model)
+        else:
+            self._insert_cleavage_constraints_variable_spacer_length(self._params, model)
+
+        # custom constraints and objective
+        self._logger.debug('Building custom vaccine constraints...')
+        for constr in self._constraints:
+            constr.insert_constraint(model, None)
+
+        self._logger.debug('Building immunogenicity objective...')
+        self._objective_variable = self._objective.insert_objective(model, None)
+
+        # create solver
+        self._model = model
+        self._solver = SolverFactory(self._solver_type)
+        if isinstance(self._solver, PersistentSolver):
+            self._solver.set_instance(self._model)
+
+        # set solver in constraints and objectives
+        for constr in self._constraints:
+            constr.solver = self._solver
+        self._objective.solver = self._solver
+
+        self._built = True
+        self._logger.info('Model built successfully!')
+
+        self._log_model_size()
+
+        return self
+
+    def _build_model_objects(self, model):
         model.Epitopes = aml.RangeSet(0, len(self._params.epitope_immunogen) - 1)
         model.Aminoacids = aml.RangeSet(0, len(self._params.pcm_matrix) - 1)
         model.EpitopePositions = aml.RangeSet(0, self._params.vaccine_length - 1)
@@ -178,8 +392,6 @@ class StrobeSpacer:
             initialize=lambda model, i, j: self._params.all_epitopes[i][j]
         )
 
-        self._logger.debug('Building model variables...')
-
         # x(ij) = 1 iff epitope i is in position j
         model.x = aml.Var(model.Epitopes * model.EpitopePositions, domain=aml.Binary, initialize=0)
 
@@ -192,35 +404,6 @@ class StrobeSpacer:
 
         # i(i) is the computed cleavage at position i
         model.i = aml.Var(model.SequencePositions, domain=aml.Reals, initialize=0)
-
-        self._logger.debug('Building basic constraints...')
-        self._insert_basic_constraints(model)
-
-        self._logger.debug('Building sequence constraints...')
-        self._insert_sequence_constraints(model)
-
-        self._logger.debug('Building cleavage computation constraints...')
-        if self._params.min_spacer_length == self._params.max_spacer_length:
-            self._insert_cleavage_constraints_fixed_spacer_length(model)
-        else:
-            self._insert_cleavage_constraints_variable_spacer_length(self._params, model)
-
-        self._logger.debug('Building custom vaccine constraints...')
-        for constr in self._constraints:
-            constr.insert_constraint(model)
-
-        self._logger.debug('Building immunogenicity objective...')
-        self._objective_variable = self._objective.insert_objective(model)
-
-        self._model = model
-        self._solver = SolverFactory(self._solver_type)
-
-        self._built = True
-        self._logger.info('Model built successfully!')
-
-        self._log_model_size()
-
-        return self
 
     @staticmethod
     def _insert_basic_constraints(model):
@@ -489,7 +672,7 @@ class StrobeSpacer:
         self._logger.info('Solving model...')
         res = self._solver.solve(
             self._model,
-            options=options or {'Threads': mp.cpu_count()},
+            options=options or {'Threads': mp.cpu_count(), 'NonConvex': 2, },  # 'MIPFocus': 3},
             tee=tee, report_timing=True
         )
         if res.solver.termination_condition != TerminationCondition.optimal:
@@ -538,6 +721,26 @@ class StrobeSpacer:
             aml.value(self._objective_variable),
             cleavage
         )
+
+    def add_constraint(self, constr):
+        constr.insert_constraint(self._model, self._solver)
+        self._constraints.append(constr)
+
+    def activate_constraint(self, constr_cls):
+        for c in self._constraints:
+            if isinstance(c, constr_cls):
+                c.activate()
+
+    def deactivate_constraint(self, constr_cls):
+        for c in self._constraints:
+            if isinstance(c, constr_cls):
+                c.deactivate()
+
+    def set_objective(self, objective):
+        objective.insert_objective(self._model, self._solver)
+        objective.activate()
+        self._objective.deactivate()
+        self._objective = objective
 
 
 def insert_indicator_sum_beyond_threshold(model, name, indices, larger_than_is,
