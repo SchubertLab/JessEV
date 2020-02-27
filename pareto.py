@@ -18,7 +18,8 @@ from spacers.pcm import DoennesKohlbacherPcm
 @click.option('--increment', '-i', default=0.05, help='Effective conservation increment per round')
 @click.option('--cleavage-prior', '-p', default=0.1, help='Prior cleavage probability')
 @click.option('--mc-draws', '-n', default=100, help='How many Monte Carlo experiments to use')
-@click.option('--num-epitopes', '-e', default=5)
+@click.option('--num-epitopes', '-e', default=5, help='How many epitopes in the vaccine')
+@click.option('--upper-bound', '-u', type=float, help='Upper bound for the effective immunogenicity')
 @click.option('--log-file', type=click.Path(), help='Where to save the logs')
 @click.option('--verbose', is_flag=True, help='Print debug messages')
 @click.pass_context
@@ -32,7 +33,7 @@ def main(ctx=None, **kwargs):
     utilities.main_dispatcher(seqdesign_cli, LOGGER, ctx, kwargs)
 
 
-def seqdesign_cli(input_epitopes, output_vaccine, rounds, increment,
+def seqdesign_cli(input_epitopes, output_vaccine, rounds, increment, upper_bound,
                   cleavage_prior, num_epitopes, mc_draws, **kwargs):
     # discard epitopes containing invalid amino acids
     epitope_data = utilities.load_epitopes(input_epitopes, None, None, None)
@@ -71,7 +72,7 @@ def seqdesign_cli(input_epitopes, output_vaccine, rounds, increment,
     _ = problem.solve()
 
     problem.add_constraint(spco.MonteCarloRecoveryEstimation(mc_draws, cleavage_prior))
-    problem.set_objective(spob.EffectiveImmunogenicityObjective())
+    problem.set_objective(spob.EffectiveImmunogenicityObjective(upper_bound))
     problem.deactivate_constraint(spco.MinimumNTerminusCleavage)
     problem.deactivate_constraint(spco.MinimumCTerminusCleavage)
     problem.deactivate_constraint(spco.MaximumCleavageInsideEpitopes)
@@ -79,10 +80,10 @@ def seqdesign_cli(input_epitopes, output_vaccine, rounds, increment,
     consconstr = None
     for i in range(1, rounds):
         cons = i * increment
-        if consconstr is None:
+        if i == 1:
             consconstr = spco.MinimumEffectiveConservation(increment, name='proteins')
             problem.add_constraint(consconstr)
-        else:
+        elif i > 1:
             consconstr.update(min_conservation=cons)
 
         LOGGER.info('Solving with minimum effective conservation of %.3f', cons)

@@ -16,7 +16,8 @@ from spacers.pcm import DoennesKohlbacherPcm
 @click.argument('output-vaccine', type=click.Path())
 @click.option('--cleavage-prior', '-p', default=0.1, help='Prior cleavage probability')
 @click.option('--mc-draws', '-n', default=100, help='How many Monte Carlo experiments to use')
-@click.option('--num-epitopes', '-e', default=5)
+@click.option('--upper-bound', '-u', type=float, help='Upper bound for the effective immunogenicity')
+@click.option('--num-epitopes', '-e', default=5, help='How many epitopes in the vaccine')
 @click.option('--log-file', type=click.Path(), help='Where to save the logs')
 @click.option('--verbose', is_flag=True, help='Print debug messages')
 @click.pass_context
@@ -29,7 +30,7 @@ def main(ctx=None, **kwargs):
     utilities.main_dispatcher(seqdesign_cli, LOGGER, ctx, kwargs)
 
 
-def seqdesign_cli(input_epitopes, output_vaccine, cleavage_prior, num_epitopes, mc_draws, **kwargs):
+def seqdesign_cli(input_epitopes, output_vaccine, cleavage_prior, num_epitopes, mc_draws, upper_bound, **kwargs):
     # discard epitopes containing invalid amino acids
     epitope_data = utilities.load_epitopes(input_epitopes, None, None, None)
     pcm = DoennesKohlbacherPcm()
@@ -66,7 +67,7 @@ def seqdesign_cli(input_epitopes, output_vaccine, cleavage_prior, num_epitopes, 
 
     LOGGER.info('Now optimizing effective immunogenicity...')
     problem.add_constraint(spco.MonteCarloRecoveryEstimation(mc_draws, cleavage_prior))
-    problem.set_objective(spob.EffectiveImmunogenicityObjective())
+    problem.set_objective(spob.EffectiveImmunogenicityObjective(upper_bound))
     problem.deactivate_constraint(spco.MinimumNTerminusCleavage)
     problem.deactivate_constraint(spco.MinimumCTerminusCleavage)
     problem.deactivate_constraint(spco.MaximumCleavageInsideEpitopes)
