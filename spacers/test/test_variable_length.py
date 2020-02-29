@@ -133,3 +133,16 @@ def test_conservation():
     )
     solution = test.solve_and_check()
     assert set(solution.epitopes) == set([0, 1])
+
+
+def test_fix_solution():
+    test = BaseTest(
+        constraints=[spco.FixSolution(
+            epitopes=['MGNKWSKSI', 'SSNTEATNA'],
+            spacers=['AAY'],
+        )]
+    )
+
+    solution = test.solve_and_check()
+    assert solution.epitopes == [1, 3]
+    assert solution.spacers == ['AAY']

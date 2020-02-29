@@ -742,7 +742,7 @@ class StrobeSpacer:
                 c.deactivate()
 
     def set_objective(self, objective):
-        objective.insert_objective(self._model, self._solver)
+        objective.insert_objective(self._params, self._model, self._solver)
         objective.activate()
         self._objective.deactivate()
         self._objective = objective

@@ -756,3 +756,44 @@ class MinimumEffectiveConservation(VaccineConstraint):
         self._min_conservation = min_conservation
         self._cs['MinEffectiveConservation'].set_value(min_conservation)
         super().update()
+
+
+class FixSolution(VaccineConstraint):
+    '''
+    this constraint fixes a given, possibly partial,solution
+    '''
+
+    def __init__(self, epitopes, spacers):
+        self._epitopes = epitopes or []
+        self._spacers = spacers or []
+
+    def insert_constraint(self, params, model, solver):
+        for i, epi in enumerate(self._epitopes):
+            if epi is None:
+                continue
+
+            for j, e in enumerate(params.epitope_sequences):
+                if e != epi:
+                    continue
+
+                cname = f'FixEpitope{i}'
+                setattr(model, cname, aml.Constraint(rule=lambda model: model.x[j, i] == 1))
+                self._constraints.append(cname)
+                break
+            else:
+                raise RuntimeError(f'epitope "{epi}" not found')
+
+        for i, spacer in enumerate(self._spacers):
+            if spacer is None:
+                continue
+
+            for j, amino in enumerate(spacer):
+                a = params.pcm.get_index(amino)
+                cname = f'FixSpacer{i}Position{j}'
+                setattr(model, cname, aml.Constraint(rule=lambda model: model.y[i, j, a] == 1))
+                self._constraints.append(cname)
+
+        super().insert_constraint(params, model, solver)
+
+    def update(self, **kwargs):
+        raise NotImplementedError('lazy')
