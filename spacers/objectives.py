@@ -18,7 +18,7 @@ class SimpleImmunogenicityObjective(VaccineObjective):
     _constraint_names = ['AssignImmunogenicity']
     _variable_names = ['Immunogenicity']
 
-    def insert_objective(self, model, solver):
+    def insert_objective(self, params, model, solver):
         model.Immunogenicity = aml.Var()
         model.AssignImmunogenicity = aml.Constraint(rule=lambda model: model.Immunogenicity == sum(
             model.x[i, j] * model.EpitopeImmunogen[i] for i in model.Epitopes for j in model.EpitopePositions
@@ -28,7 +28,7 @@ class SimpleImmunogenicityObjective(VaccineObjective):
             rule=lambda model: model.Immunogenicity, sense=aml.maximize
         )
 
-        super().insert_objective(model, solver)
+        super().insert_objective(params, model, solver)
         return self._objective_variable
 
 
@@ -50,13 +50,13 @@ class EffectiveImmunogenicityObjective(VaccineObjective):
     def __init__(self, upper_bound=None):
         self._ub = upper_bound
 
-    def insert_objective(self, model, solver):
+    def insert_objective(self, params, model, solver):
         self._compute_effective_immunogen(model)
         self._objective_variable = model.EffectiveImmunogenicityObjective = aml.Objective(
             rule=lambda model: model.EffectiveImmunogenicity, sense=aml.maximize
         )
 
-        super().insert_objective(model, solver)
+        super().insert_objective(params, model, solver)
 
         return model.EffectiveImmunogenicityObjective
 

@@ -122,21 +122,21 @@ class VaccineObjective(ABC):
     base class for the milp objective
     '''
 
-    _constraint_names = []
-    _variable_names = []
+    _constraints = []
+    _variables = []
     _objective_variable = None
 
     def __init__(self):
         self._editor = None
 
     @abstractmethod
-    def insert_objective(self, model, solver):
+    def insert_objective(self, params, model, solver):
         '''
         insert the objective in the model. call super() at the end to automatically initialize
         a model editor and insert constraints into the persistent solver if necessary
         '''
 
-        self._editor = ModelEditor(model, solver, self._constraint_names, self._variable_names)
+        self._editor = ModelEditor(model, solver, self._constraints, self._variables)
         self._editor.enable()
         self._model = model
         self._solver = solver
@@ -176,22 +176,26 @@ class VaccineConstraint(ABC):
     base class for adding constraints to the milp model
     '''
 
-    _constraint_names = []
-    _variable_names = []
+    _constraints = []
+    _variables = []
+    _model = None
+    _solver = None
+    _params = None
 
     @abstractmethod
-    def insert_constraint(self, model, solver):
+    def insert_constraint(self, params, model, solver):
         '''
         insert the constraints in the model. call super() at the end to automatically initialize
         a model editor and insert constraints into the persistent solver if necessary
         '''
 
-        self._editor = ModelEditor(model, solver, self._constraint_names, self._variable_names,
+        self._editor = ModelEditor(model, solver, self._constraints, self._variables,
                                    raise_exceptions=False)
         self._editor.add_variables()
         self._editor.add_constraints()
         self._model = model
         self._solver = solver
+        self._params = params
 
     @abstractmethod
     def update(self, **kwargs):
@@ -272,6 +276,7 @@ class ModelParams:
         self.max_spacer_length = max_spacer_length
         self.vaccine_length = vaccine_length
         self.all_epitopes = [[self.pcm.get_index(a) for a in e] for e in all_epitopes]
+        self.epitope_sequences = all_epitopes
         self.epitope_immunogen = epitope_immunogen
         self.epitope_length = len(self.all_epitopes[0])
         self.pcm_matrix = self._fetch_pcm_matrix()
@@ -342,10 +347,10 @@ class StrobeSpacer:
         # custom constraints and objective
         self._logger.debug('Building custom vaccine constraints...')
         for constr in self._constraints:
-            constr.insert_constraint(model, None)
+            constr.insert_constraint(self._params, model, None)
 
         self._logger.debug('Building immunogenicity objective...')
-        self._objective_variable = self._objective.insert_objective(model, None)
+        self._objective_variable = self._objective.insert_objective(self._params, model, None)
 
         # create solver
         self._model = model

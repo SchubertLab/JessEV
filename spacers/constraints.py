@@ -24,7 +24,7 @@ class MaximumCleavageInsideEpitopes(VaccineConstraint):
     cleavage at the n-terminus
     '''
 
-    _constraint_names = ['MaxInnerEpitopeCleavageConstraint']
+    _constraints = ['MaxInnerEpitopeCleavageConstraint']
 
     def __init__(self, max_cleavage, ignore_first=1):
         self._max_cleavage = max_cleavage
@@ -37,12 +37,12 @@ class MaximumCleavageInsideEpitopes(VaccineConstraint):
         else:
             return aml.Constraint.Satisfied
 
-    def insert_constraint(self, model, solver):
+    def insert_constraint(self, params, model, solver):
         model.MaxInnerEpitopeCleavage = aml.Param(initialize=self._max_cleavage, mutable=True)
         model.MaxInnerEpitopeCleavageConstraint = aml.Constraint(
             model.EpitopePositions * model.PositionInsideEpitope, rule=self._constraint_rule
         )
-        super().insert_constraint(model, solver)
+        super().insert_constraint(params, model, solver)
 
     def update(self, max_cleavage=None, ignore_first=None):
         dirty = False
@@ -71,18 +71,18 @@ class MinimumNTerminusCleavage(VaccineConstraint):
     would contradict each other
     '''
 
-    _constraint_names = ['MinNtCleavageConstraint']
+    _constraints = ['MinNtCleavageConstraint']
 
     def __init__(self, min_cleavage):
         self._min_cleavage = min_cleavage
 
-    def insert_constraint(self, model, solver):
+    def insert_constraint(self, params, model, solver):
         model.MinNtCleavage = aml.Param(initialize=self._min_cleavage, mutable=True)
         model.MinNtCleavageConstraint = aml.Constraint(
             model.EpitopePositions, rule=self._constraint_rule
         )
 
-        super().insert_constraint(model, solver)
+        super().insert_constraint(params, model, solver)
 
     @staticmethod
     def _constraint_rule(model, epi):
@@ -104,18 +104,18 @@ class MinimumCTerminusCleavage(VaccineConstraint):
     enforces a minimum cleavage score at the first position of every spacer
     '''
 
-    _constraint_names = ['MinCtCleavageConstraint']
+    _constraints = ['MinCtCleavageConstraint']
 
     def __init__(self, min_cleavage):
         self._min_cleavage = min_cleavage
 
-    def insert_constraint(self, model, solver):
+    def insert_constraint(self, params, model, solver):
         model.MinCtCleavage = aml.Param(initialize=self._min_cleavage, mutable=True)
         model.MinCtCleavageConstraint = aml.Constraint(
             model.SpacerPositions, rule=self._constraint_rule
         )
 
-        super().insert_constraint(model, solver)
+        super().insert_constraint(params, model, solver)
 
     @staticmethod
     def _constraint_rule(model, spacer):
@@ -149,7 +149,7 @@ class MinimumCoverageAverageConservation(VaccineConstraint):
         else:
             self._name = name
 
-    def insert_constraint(self, model, solver):
+    def insert_constraint(self, params, model, solver):
         cs = {}  # we create components here, then insert them with the prefixed name
 
         cs['Options'] = aml.RangeSet(0, len(self._epitope_coverage[0]) - 1)
@@ -196,12 +196,12 @@ class MinimumCoverageAverageConservation(VaccineConstraint):
             name = '%s_%s' % (self._name, k)
             setattr(model, name, v)
             if isinstance(v, aml.Constraint):
-                self._constraint_names.append(name)
+                self._constraints.append(name)
             elif isinstance(v, aml.Var):
-                self._variable_names.append(name)
+                self._variables.append(name)
 
         self._cs = cs
-        super().insert_constraint(model, solver)
+        super().insert_constraint(params, model, solver)
 
     def update(self, min_coverage=None, min_conservation=None):
         dirty = False
@@ -231,9 +231,9 @@ class DualImplementationConstraints(VaccineConstraint, ABC):
         super().__init__()
         self._instance = None
 
-    def insert_constraint(self, model, solver):
+    def insert_constraint(self, params, model, solver):
         if self._instance is None:
-            if model.MinSpacerLength == model.MaxSpacerLength:
+            if params_min_spacer_length == params.max_spacer_length:
                 self._instance = self._get_fixed_spacer_length_constraints()
                 typ = 'fixed'
             else:
@@ -245,7 +245,7 @@ class DualImplementationConstraints(VaccineConstraint, ABC):
                     'these constraints do not support a model with %s length spacers' % typ
                 )
 
-        self._instance.insert_constraint(model, solver)
+        self._instance.insert_constraint(params, model, solver)
 
     @abstractmethod
     def _get_fixed_spacer_length_constraints(self) -> VaccineConstraint:
@@ -292,8 +292,8 @@ class VariableLengthMinimumNTerminusCleavageGap(VaccineConstraint):
     and the cleavage of surrounding amino acids (next one and previous four)
     '''
 
-    _constraint_names = ['AssignNTerminusMask', 'MinCleavageGapConstraint']
-    _variable_names = ['NTerminusMask']
+    _constraints = ['AssignNTerminusMask', 'MinCleavageGapConstraint']
+    _variables = ['NTerminusMask']
 
     def __init__(self, min_gap):
         self._min_gap = min_gap
@@ -320,7 +320,7 @@ class VariableLengthMinimumNTerminusCleavageGap(VaccineConstraint):
         else:
             return aml.Constraint.Satisfied
 
-    def insert_constraint(self, model, solver):
+    def insert_constraint(self, params, model, solver):
         model.MinCleavageGap = aml.Param(initialize=self._min_gap, mutable=True)
 
         model.NTerminusMask = aml.Var(
@@ -334,7 +334,7 @@ class VariableLengthMinimumNTerminusCleavageGap(VaccineConstraint):
             model.EpitopePositions * model.OffsetAround, rule=self._constraint_rule
         )
 
-        super().insert_constraint(model, solver)
+        super().insert_constraint(params, model, solver)
 
     def update(self, min_gap=None):
         self._min_gap = min_gap
@@ -367,7 +367,7 @@ class FixedLengthBoundCleavageInsideSpacers(VaccineConstraint):
     except at the c-terminus
     use None to disable the corresponding constraint
     '''
-    _constraint_names = ['BoundCleavageInsideSpacersConstraint']
+    _constraints = ['BoundCleavageInsideSpacersConstraint']
 
     def __init__(self, min_cleavage, max_cleavage):
         self._min_cleavage = min_cleavage
@@ -394,7 +394,7 @@ class FixedLengthBoundCleavageInsideSpacers(VaccineConstraint):
         else:
             return aml.Constraint.Satisfied
 
-    def insert_constraint(self, model, solver):
+    def insert_constraint(self, params, model, solver):
         model.MinSpacerCleavage = aml.Param(initialize=self._min_cleavage, mutable=True)
         model.MaxSpacerCleavage = aml.Param(initialize=self._max_cleavage, mutable=True)
 
@@ -403,7 +403,7 @@ class FixedLengthBoundCleavageInsideSpacers(VaccineConstraint):
             rule=self._constraint_rule
         )
 
-        super().insert_constraint(model, solver)
+        super().insert_constraint(params, model, solver)
 
     def update(self, model, solver, min_cleavage=None, max_cleavage=None):
         dirty = False
@@ -427,7 +427,7 @@ class VariableLengthBoundCleavageInsideSpacers(VaccineConstraint):
     use None to disable the corresponding constraint
     '''
 
-    _constraint_names = ['BoundCleavageInsideSpacersConstraint']
+    _constraints = ['BoundCleavageInsideSpacersConstraint']
 
     def __init__(self, min_cleavage, max_cleavage):
         self._min_cleavage = min_cleavage
@@ -453,7 +453,7 @@ class VariableLengthBoundCleavageInsideSpacers(VaccineConstraint):
         else:
             return aml.Constraint.Satisfied
 
-    def insert_constraint(self, model, solver):
+    def insert_constraint(self, params, model, solver):
         if self._min_cleavage is not None:
             model.MinSpacerCleavage = aml.Param(initialize=self._min_cleavage)
         if self._max_cleavage is not None:
@@ -464,7 +464,7 @@ class VariableLengthBoundCleavageInsideSpacers(VaccineConstraint):
             rule=self._constraint_rule
         )
 
-        super().insert_constraint(model, solver)
+        super().insert_constraint(params, model, solver)
 
     def update(self, model, solver, min_cleavage=None, max_cleavage=None):
         dirty = False
@@ -489,7 +489,7 @@ class MonteCarloRecoveryEstimation(VaccineConstraint):
     '''
 
     # these are for fixed length, more are added below for variable length
-    _constraint_names = [
+    _constraints = [
         'McBernoulliTrialsSetPositive',
         'McBernoulliTrialsSetNegative',
         'McCleavageTrialsSetPositive',
@@ -500,7 +500,7 @@ class MonteCarloRecoveryEstimation(VaccineConstraint):
         'AssingRecoveredEpitopesFrequency',
     ]
 
-    _variable_names = [
+    _variables = [
         'McRecoveredEpitopesFrequency',
         'McBernoulliTrials',
         'McCleavageTrials',
@@ -519,7 +519,7 @@ class MonteCarloRecoveryEstimation(VaccineConstraint):
             raise ValueError('cleavage prior must be between 0 and 1')
         self._cleavage_prior = math.log(cleavage_prior)
 
-    def insert_constraint(self, model, solver):
+    def insert_constraint(self, params, model, solver):
         model.McDrawIndices = aml.RangeSet(0, self._mc_draws - 1)
         model.McDrawCount = aml.Param(initialize=self._mc_draws)
         model.McRandoms = aml.Param(
@@ -532,7 +532,7 @@ class MonteCarloRecoveryEstimation(VaccineConstraint):
         self._compute_cleavage_frequencies(model)
         self._compute_recovered_epitopes(model)
 
-        super().insert_constraint(model, solver)
+        super().insert_constraint(params, model, solver)
 
     def _compute_bernoulli_trials(self, model):
         '''
@@ -562,8 +562,8 @@ class MonteCarloRecoveryEstimation(VaccineConstraint):
             self._compute_cleavage_locations_fixed_spacer_length(model)
         else:
             self._compute_cleavage_locations_variable_spacer_length(model)
-            self._variable_names.append('McCleavageNotBlocked')
-            self._constraint_names.extend(['McCleavageNotBlockedSetPositive', 'McCleavageNotBlockedSetNegative'])
+            self._variables.append('McCleavageNotBlocked')
+            self._constraints.extend(['McCleavageNotBlockedSetPositive', 'McCleavageNotBlockedSetNegative'])
 
     def _compute_cleavage_locations_fixed_spacer_length(self, model):
         '''
@@ -711,9 +711,9 @@ class MinimumEffectiveConservation(VaccineConstraint):
         self._min_conservation = min_conservation
         self._name = name
 
-    def insert_constraint(self, model, solver):
+    def insert_constraint(self, params, model, solver):
         self._compute_effective_conservation(model)
-        super().insert_constraint(model, solver)
+        super().insert_constraint(params, model, solver)
 
     def _compute_effective_conservation(self, model):
         cs = {}
@@ -746,9 +746,9 @@ class MinimumEffectiveConservation(VaccineConstraint):
             name = '%s_Effective_%s' % (self._name, k)
             setattr(model, name, v)
             if isinstance(v, aml.Constraint):
-                self._constraint_names.append(name)
+                self._constraints.append(name)
             elif isinstance(v, aml.Var):
-                self._variable_names.append(name)
+                self._variables.append(name)
 
         self._cs = cs
 
