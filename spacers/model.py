@@ -728,7 +728,7 @@ class StrobeSpacer:
         )
 
     def add_constraint(self, constr):
-        constr.insert_constraint(self._model, self._solver)
+        constr.insert_constraint(self._params, self._model, self._solver)
         self._constraints.append(constr)
 
     def activate_constraint(self, constr_cls):
@@ -742,7 +742,7 @@ class StrobeSpacer:
                 c.deactivate()
 
     def set_objective(self, objective):
-        objective.insert_objective(self._params, self._model, self._solver)
+        self._objective_variable = objective.insert_objective(self._params, self._model, self._solver)
         objective.activate()
         self._objective.deactivate()
         self._objective = objective

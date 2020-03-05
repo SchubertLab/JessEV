@@ -15,8 +15,8 @@ class SimpleImmunogenicityObjective(VaccineObjective):
     this objective maximizes the sum of the immunogenicities of the selected epitopes
     '''
 
-    _constraint_names = ['AssignImmunogenicity']
-    _variable_names = ['Immunogenicity']
+    _constraints = ['AssignImmunogenicity']
+    _variables = ['Immunogenicity']
 
     def insert_objective(self, params, model, solver):
         model.Immunogenicity = aml.Var()
@@ -44,8 +44,8 @@ class EffectiveImmunogenicityObjective(VaccineObjective):
     a sub-optimal solution if the bound is too tight
     '''
 
-    _constraint_names = ['AssignPositionImmunogenicity', 'AssignEffectiveImmunogenicity']
-    _variable_names = ['PositionImmunogenicity', 'EffectiveImmunogenicity']
+    _constraints = ['AssignPositionImmunogenicity', 'AssignEffectiveImmunogenicity']
+    _variables = ['PositionImmunogenicity', 'EffectiveImmunogenicity']
 
     def __init__(self, upper_bound=None):
         self._ub = upper_bound
