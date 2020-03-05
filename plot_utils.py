@@ -289,9 +289,13 @@ def compute_probability_of_improvement(monte_carlo_df, comparison, column,
             'eqnz': np.mean((np.abs(idx2 - idx1) < 1e-2) & (idx2 > 0)),
         })
 
-    poi = monte_carlo_df.merge(
-        comparison, on=['baseline', 'experiment', 'param_1', 'param_2', 'param_3', 'param_4']
-    ).groupby('baseline').apply(probability_of_improvement)
+    poi = monte_carlo_df.merge(comparison, on=[
+        'baseline', 'experiment', 'param_1', 'param_2', 'param_3', 'param_4'
+    ]).groupby(
+        'baseline'
+    ).apply(
+        probability_of_improvement
+    )
     poi.index = poi.index / 1000
 
     return poi
@@ -630,3 +634,34 @@ def plot_many_by_baseline(ax, comparison_df, masks, col_name, xlabel=None,
     for mm in masks:
         plot_by_baseline(ax, comparison_df[mm], col_name, xlabel, ylabel,
                          title, experiment_names)
+
+
+def find_parameter_trace(comparison):
+    done = set()
+    xs, ys, ps = [], [], []
+    xgrid = sorted(comparison.param_1.unique())
+    ygrid = sorted(comparison.param_2.unique())
+
+    for i, row in comparison.iterrows():
+        i1, i2 = xgrid.index(row.param_1), ygrid.index(row.param_2)
+        if (i1, i2) in done:
+            continue
+
+        done.add((i1, i2))
+        xs.append(row.param_1)
+        ys.append(row.param_2)
+        ps.append(row.baseline / 1000)
+
+    return xs, ys, ps
+
+
+def annotate_axis(ax, notes, xs, ys, offsets):
+    for i in range(len(notes)):
+        ax.annotate(
+            notes[i],
+            xy=(xs[i], ys[i]),
+            xytext=offsets[i],
+            textcoords="offset points",
+            ha='right',
+            va='bottom'
+        )

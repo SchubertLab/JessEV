@@ -40,98 +40,69 @@ import plot_utils as utl
 sns.set()
 
 # %%
-df = utl.compute_mc_experiments(baselines=[
-    0.025, 0.050, 0.075, 0.100, 0.150, 0.200, 0.300, 0.500, 0.650, 0.1000
-])
-# convert to int so we can reliaby filter on them
-df.baseline = 1000 * df.baseline
-df.baseline = df.baseline.astype(np.int)
-df = df.fillna(-100)  # stupid pandas discards na's in groupby's
-
+df_fname = './dev/experiments-monte-carlo.csv.gz'
+if not os.path.exists(df_fname):
+    df = utl.compute_mc_experiments(baselines=[
+        0.025, 0.050, 0.075, 0.100, 0.150, 0.200, 0.300, 0.500, 0.650, 1.0
+    ])
+    # convert to int so we can reliaby filter on them
+    df.baseline = 1000 * df.baseline
+    df.baseline = df.baseline.astype(np.int)
+    df = df.fillna(-100)  # stupid pandas discards na's in groupby's
+    df.to_csv(df_fname, index=False)
+    print('Re-created Monte Carlo experiments')
+else:
+    df = pd.read_csv(df_fname)
+    print('Used existing Monte Carlo experiments')
+    
 df
 
 # %% [markdown]
 # # comparison
 
 # %%
-comparison = utl.compare_experiments(df, 'mean_eig')  # best effective immunogen
-comp_cov = utl.compare_experiments(df, 'mean_prot')   # best coverage
+# comparison on effective immunogenicity and protein converage
+comparison = utl.compare_experiments(df, 'mean_eig')
+comp_cov = utl.compare_experiments(df, 'mean_prot')
+
+mask_seq = (comparison.experiment == 'sequential')
+mask_us = (comparison.experiment == 'res-comb-nc-')
+
+mask_comp_us = (comp_cov.experiment == 'res-cov-')
+mask_comp_seq = (comp_cov.experiment == 'sequential-cov')
+
+# expected improvement
+improv = utl.compute_expected_improvement(
+    comparison, 'mean_eig', 'sequential', 'res-comb-nc-'
+)
+improv_cov = utl.compute_expected_improvement(
+    comp_cov, 'mean_prot', 'sequential-cov', 'res-cov-'
+)
+improv_alle = utl.compute_expected_improvement(
+    comp_cov, 'mean_alle', 'sequential-cov', 'res-cov-'
+)
+
+# probability of improvement
+poi = utl.compute_probability_of_improvement(
+    df, comparison, 'effective_immunogen', 'sequential', 'res-comb-nc-', 5000
+)
+poi_cov = utl.compute_probability_of_improvement(
+    df, comp_cov, 'proteins', 'sequential-cov', 'res-cov-', 100
+)
+poi_alle = utl.compute_probability_of_improvement(
+    df, comp_cov, 'alleles', 'sequential-cov', 'res-cov-', 100
+)
 
 # %%
-fig = plt.figure(figsize=(12, 4), dpi=96)
-(ax1, ax2, ax3) = fig.subplots(1, 3)
-
 experiment_replacement = {
     'res-comb-nc-': 'Our results',
+    'res-cov-': 'Our results',
     'sequential': 'Sequential',
+    'sequential-cov': 'Sequential',
 }
 
-mask_seq = (comparison.experiment == 'sequential') & (comparison.baseline.isin(bases))
-mask_us = (comparison.experiment == 'res-comb-nc-') & (comparison.baseline.isin(bases))
-
-utl.plot_many_by_baseline(
-    ax1, comparison, [mask_us, mask_seq], 'eig',
-    title='(a) Effective Immunogenicity',
-    experiment_names=experiment_replacement
-)
-
-utl.plot_many_by_baseline(
-    ax2, comparison, [mask_us, mask_seq], 'rec',
-    title='(b) Recovered epitopes',
-    experiment_names=experiment_replacement
-)
-
-utl.plot_many_by_baseline(
-    ax3, comparison, [mask_us, mask_seq], 'len',
-    title='(c) Average fragment length',
-    experiment_names=experiment_replacement
-)
-
-ax3.legend()
-
-fig.tight_layout()
-fig.savefig('./dev/effective.pdf')
-
-# %% [markdown]
-# # comparison on coverage
-
-# %%
-experiment_replacement['sequential-cov'] = 'Sequential'
-experiment_replacement['res-cov-'] = 'Our Results'
-
-fig = plt.figure(figsize=(10, 4), dpi=300)
-ax1, ax2 = fig.subplots(1, 2)
-
-mask_comp_us = (comp_cov.experiment == 'res-cov-') & (comp_cov.baseline.isin(bases))
-mask_comp_seq = (comp_cov.experiment == 'sequential-cov') & (comp_cov.baseline.isin(bases))
-
-utl.plot_many_by_baseline(
-    ax1, comp_cov, [mask_comp_us, mask_comp_seq], 'prot',
-    xlabel='Prior cleavage probability',
-    title='(a) Pathogen Coverage',
-    experiment_names=experiment_replacement
-)
-
-utl.plot_many_by_baseline(
-    ax2, comp_cov, [mask_comp_us, mask_comp_seq], 'alle',
-    xlabel='Prior cleavage probability',
-    title='(a) HLA Coverage',
-    experiment_names=experiment_replacement
-)
-
-ax2.set_ylim(-1, 31)
-ax1.legend(loc='upper right')
-
-fig.tight_layout()
-
-fig.savefig('dev/coverage.pdf')
-
-# %% [markdown]
-# # comparison together
-
-# %%
-fig = plt.figure(figsize=(10, 6), dpi=300)
-((ax1, ax2), (ax3, ax4)) = fig.subplots(2, 2)
+fig = plt.figure(figsize=(15, 6), dpi=300)
+((ax1, ax2, ax5), (ax3, ax4, ax6)) = fig.subplots(2, 3)
 
 utl.plot_many_by_baseline(
     ax1, comparison, [mask_us, mask_seq], 'rec',
@@ -148,104 +119,53 @@ utl.plot_many_by_baseline(
 utl.plot_many_by_baseline(
     ax3, comp_cov, [mask_comp_us, mask_comp_seq], 'prot',
     xlabel='Prior cleavage probability',
-    title='(c) Pathogen Coverage',
+    title='(d) Pathogen Coverage',
     experiment_names=experiment_replacement
 )
 
 utl.plot_many_by_baseline(
     ax4, comp_cov, [mask_comp_us, mask_comp_seq], 'alle',
     xlabel='Prior cleavage probability',
-    title='(c) HLA Coverage',
+    title='(e) HLA Coverage',
     experiment_names=experiment_replacement
 )
 
+ax5.semilogx(poi_cov.index, poi_cov['ge'], 'C0o-', label='Effective pathogen coverage')
+ax5.semilogx(poi.index, poi['ge'], 'C1o-', label='Effective immunogenicity')
+ax5.semilogx(poi_alle.index, poi_alle['ge'], 'C2o-', label='Effective allele coverage')
+
+ax6.loglog(improv.index, improv['res-comb-nc-'] / improv['sequential'], 'C0o-', label='Effective pathogen coverage')
+ax6.loglog(improv_cov.index, improv_cov['res-cov-'] / improv_cov['sequential-cov'], 'C1o-', label='Effective immunogenicity')
+ax6.loglog(improv_alle.index, improv_alle['res-cov-'] / improv_alle['sequential-cov'], 'C2o-', label='Effective allele coverage')
+
+ax5.set_ylim(-0.05, 1.05)
+ax6.set_ylim(0.8, 1.2e3)
+
+ax5.set_xlim(0.02, 1.1)
+ax6.set_xlim(0.02, 1.1)
+
+ax5.set_title('(c) Probability of no-reduction')
+ax6.set_title('(f) Expected improvement')
+
+ax6.set_xlabel('Prior cleavage probability')
+
+ax6.grid(True, axis='y', which='minor')
+
 ax4.set_ylim(-1, 31)
-ax1.legend(loc='upper right')
+ax1.legend(loc='upper left')
+ax2.legend(loc='upper left')
+ax3.legend(loc='upper right')
+ax4.legend(loc='upper right')
+ax5.legend(loc='lower left')
+ax6.legend(loc='upper left')
 
-for ax in [ax1, ax2, ax3, ax4]:
+for ax in [ax1, ax2, ax3, ax4, ax5, ax6]:
     ax.grid(True, 'minor', axis='x')
+    ax.set_xticks([0.02, 0.1, 0.4, 1])
+    ax.set_xticklabels(['0.02', '0.1', '0.4', '1.0'])
 
 fig.tight_layout()
-fig.savefig('dev/comparison_all.pdf')
-
-# %% [markdown]
-# # probability of improvement and expected improvement
-
-# %%
-improv = utl.compute_expected_improvement(
-    comparison, 'mean_eig', 'sequential', 'res-comb-nc-'
-)
-poi = utl.compute_probability_of_improvement(
-    df, comparison, 'effective_immunogen', 'sequential', 'res-comb-nc-', 5000
-)
-
-# %%
-fig = plt.figure(figsize=(10, 4), dpi=300)
-ax1, ax2 = fig.subplots(1, 2)
-ax1.plot(poi['ge'].iloc[1:], 'o-', label='Not worse')
-ax1.plot(poi['eq'].iloc[1:], 'o-', label='Both zero')
-ax1.legend()
-
-ax1.set_xlabel('Prior cleavage probability')
-ax1.set_ylabel('Probability')
-ax1.set_title('(a) Probability of improvement')
-
-ax2.semilogy(improv['res-comb-nc-'] / improv['sequential'], 'o-')
-ax2.grid(True, 'minor')
-#ax2.plot([0, 0.7], [1, 1], 'C2--')
-ax2.set_title('(b) Expected improvement')
-ax2.set_xlabel('Prior cleavage probability')
-
-fig.tight_layout()
-fig.savefig('dev/improvement.pdf')
-
-# %% [markdown]
-# # probability of improvement/expected improvement of all metrics
-
-# %%
-improv_cov = utl.compute_expected_improvement(
-    comp_cov, 'mean_prot', 'sequential-cov', 'res-cov-'
-)
-improv_alle = utl.compute_expected_improvement(
-    comp_cov, 'mean_alle', 'sequential-cov', 'res-cov-'
-)
-
-poi_cov = utl.compute_probability_of_improvement(
-    df, comp_cov, 'proteins', 'sequential-cov', 'res-cov-', 100
-)
-poi_alle = utl.compute_probability_of_improvement(
-    df, comp_cov, 'alleles', 'sequential-cov', 'res-cov-', 100
-)
-
-# %%
-fig = plt.figure(figsize=(10, 4), dpi=96)
-ax1, ax2 = fig.subplots(1, 2)
-
-ax1.semilogx(poi_cov.index, poi_cov['ge'], 'C0o-', label='Effective pathogen coverage')
-ax1.semilogx(poi.index, poi['ge'], 'C1o-', label='Effective immunogenicity')
-ax1.semilogx(poi_alle.index, poi_alle['ge'], 'C2o-', label='Effective allele coverage')
-
-ax1.set_ylim(-0.05, 1.05)
-ax1.legend(loc='lower left')
-ax1.set_title('(a) Probability of no-reduction')
-ax1.set_xlabel('Prior cleavage probability')
-
-ax2.loglog(improv.index, improv['res-comb-nc-'] / improv['sequential'], 'C0o-')
-ax2.loglog(improv_cov.index, improv_cov['res-cov-'] / improv_cov['sequential-cov'], 'C1o-')
-ax2.loglog(improv_alle.index, improv_alle['res-cov-'] / improv_alle['sequential-cov'], 'C2o-')
-
-ax2.set_ylim(0.8, 1.2e3)
-ax1.set_xlim(0.02, 0.8)
-ax2.set_xlim(0.02, 0.8)
-ax2.set_title('(b) Expected improvement')
-ax2.set_xlabel('Prior cleavage probability')
-
-ax1.grid(True, axis='x', which='minor')
-ax2.grid(True, axis='y', which='minor')
-ax2.grid(True, axis='x', which='minor')
-
-fig.tight_layout()
-fig.savefig('dev/improvement_ig_cov_alle.pdf')
+fig.savefig('dev/comparison_all_together.pdf')
 
 # %% [markdown]
 # # evolution of best parameter
@@ -254,54 +174,88 @@ fig.savefig('dev/improvement_ig_cov_alle.pdf')
 xgrid = [1.4, 1.74, 1.8, 1.95, 2.25, 2.5, 2.75]
 epigrid = [-1, -0.5, -0.2, -0.1, 0.0, 0.1, 0.2, 0.5, 1.0]
 
-done = set()
-xs, ys, ps, cs = [], [], [], []
-for i, row in comparison[comparison.experiment == 'res-comb-nc-'].iterrows():
-    if i == 0:
-        continue
-        
-    i1, i2 = xgrid.index(row.param_1), epigrid.index(row.param_2)
-    if (i1, i2) in done:
-        continue
-        
-    done.add((i1, i2))
-    xs.append(i1)
-    ys.append(i2)
-    ps.append(row.baseline / 1000)
-    
-    cmap = plt.get_cmap('viridis')
-    cs.append(cmap.colors[int(255 * row.mean_eig / 0.8)])
+xs_eig, ys_eig, ps_eig = utl.find_parameter_trace(
+    comparison[comparison.experiment == 'res-comb-nc-']
+)
 
+xs_cov, ys_cov, ps_cov = utl.find_parameter_trace(
+    comp_cov[comp_cov.experiment == 'res-cov-']
+)
+
+fig = plt.figure(figsize=(12, 4), dpi=300)
+ax1, ax2 = fig.subplots(1, 2, gridspec_kw={
+    'wspace': 0.2,
+    'width_ratios': [0.85, 1],
+    'left': 0.06, 'right': 1.01, 'top': 0.925, 'bottom': 0.15
+})
+
+ax1.plot(ys_eig, xs_eig, 'o-', label='Effective immunogenicity')
+ax1.plot(ys_cov, xs_cov, 'o-', label='Effective coverage')
+    
+utl.annotate_axis(
+    ax1, ['%.3f' % p for p in ps_eig],
+    ys_eig, xs_eig, offsets=[
+        (40, -18),
+        (-5, 3),
+        (-5, 3),
+        (40, -18),
+        (40, -10),
+    ]
+)
+
+utl.annotate_axis(
+    ax1, ['%.3f' % p for p in ps_cov],
+    ys_cov, xs_cov, offsets=[
+        (-5, -10),
+        (-5, 3),
+        (-5, 3),
+    ]
+)
+
+ax1.set_ylabel('Minimum termini cleavage')
+ax1.set_xlabel('Maximum inner epitope cleavage')
+ax1.set_title('(a) Best parameters for different thresholds')
+ax1.legend()
+
+mm = utl.plot_prefix_2(
+    'res-comb-nc-', 
+    xlabel='Minimum termini cleavage',
+    ylabel='Maximum inner epitope cleavage',
+    title='(b) Immunogenicity for each parameter setting',
+    #swapxy=True,
+    ax=ax2,
+    imshow_kwargs={'cmap': 'viridis', 'vmin': 0.4, 'vmax': 1.3}
+)
+ax2.grid(False)
+fig.colorbar(mm, ax=ax2)
+
+fig.savefig('dev/parameters.pdf')
+
+# %%
+_, proteins, _ = utl.read_epitope_data()
+
+# %%
+all_prots = set()
+for p in proteins.values():
+    all_prots.update(p)
+len(all_prots)
+
+# %%
+690/len(proteins)
+
+# %%
+yy[int(0.05 * len(proteins))]
+
+# %%
+yy = list(sorted((len(p) / len(all_prots) for p in proteins.values()), reverse=True))
 fig = plt.figure()
 ax = fig.subplots()
-
-ax.plot(ys, xs, 'o-')
-#ax.scatter(ys, xs, c=cs)
-
-offsets = [
-    (-3, 0),
-    (-5, 3),
-    (40, -7),
-    (-5, -7),
-    (-5, -7),
-    (-5, 3),
-    (25, -20),
-    (30, 3),
-]
-for i in range(len(ps)):
-    ax.annotate('%.3f' % ps[i],
-            xy=(ys[i], xs[i]), xytext=offsets[i],
-            #color='red',
-            textcoords="offset points",
-            ha='right', va='bottom')
-
-ax.set_xticks(range(len(epigrid)))
-ax.set_xticklabels(['%.1f' % x for x in sorted(set(epigrid))])
-ax.set_yticks(range(len(xgrid)))
-ax.set_yticklabels(['%.2f' % x for x in sorted(set(xgrid))])
-ax.set_ylim(0.5, 5.5)
-ax.set_ylabel('Termini cleavage')
-ax.set_xlabel('Internal epitope cleavage')
+ax.semilogx(range(len(yy)), yy, '.')
+ax.set_xlabel('Epitope rank')
+ax.set_ylabel('Pathogens covered')
+ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
+ax.set_yticklabels(['0%', '20%', '40%', '60%', '80%', '100%'])
+ax.set_ylim(-0.1, 1.05)
 fig.tight_layout()
 
 # %% [markdown]
