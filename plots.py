@@ -167,96 +167,128 @@ for ax in [ax1, ax2, ax3, ax4, ax5, ax6]:
 fig.tight_layout()
 fig.savefig('dev/comparison_all_together.pdf')
 
+
 # %% [markdown]
-# # evolution of best parameter
+# # study of parameters
 
 # %%
-xgrid = [1.4, 1.74, 1.8, 1.95, 2.25, 2.5, 2.75]
-epigrid = [-1, -0.5, -0.2, -0.1, 0.0, 0.1, 0.2, 0.5, 1.0]
+def plot_parameter_evolution(ax):
+    xgrid = [1.4, 1.74, 1.8, 1.95, 2.25, 2.5, 2.75]
+    epigrid = [-1, -0.5, -0.2, -0.1, 0.0, 0.1, 0.2, 0.5, 1.0]
 
-xs_eig, ys_eig, ps_eig = utl.find_parameter_trace(
-    comparison[comparison.experiment == 'res-comb-nc-']
-)
+    xs_eig, ys_eig, ps_eig = utl.find_parameter_trace(
+        comparison[comparison.experiment == 'res-comb-nc-']
+    )
 
-xs_cov, ys_cov, ps_cov = utl.find_parameter_trace(
-    comp_cov[comp_cov.experiment == 'res-cov-']
-)
+    xs_cov, ys_cov, ps_cov = utl.find_parameter_trace(
+        comp_cov[comp_cov.experiment == 'res-cov-']
+    )
 
-fig = plt.figure(figsize=(12, 4), dpi=300)
-ax1, ax2 = fig.subplots(1, 2, gridspec_kw={
-    'wspace': 0.2,
-    'width_ratios': [0.85, 1],
-    'left': 0.06, 'right': 1.01, 'top': 0.925, 'bottom': 0.15
-})
-
-ax1.plot(ys_eig, xs_eig, 'o-', label='Effective immunogenicity')
-ax1.plot(ys_cov, xs_cov, 'o-', label='Effective coverage')
+    ax.plot(ys_eig, xs_eig, 'o-', label='Effective immunogenicity')
+    ax.plot(ys_cov, xs_cov, 'o-', label='Effective coverage')
     
-utl.annotate_axis(
-    ax1, ['%.3f' % p for p in ps_eig],
-    ys_eig, xs_eig, offsets=[
-        (40, -18),
-        (-5, 3),
-        (-5, 3),
-        (40, -18),
-        (40, -10),
-    ]
-)
+    utl.annotate_axis(
+        ax1, ['%.3f' % p for p in ps_eig],
+        ys_eig, xs_eig, offsets=[(40, -18), (-5, 3), (-5, 3), (40, -18), (40, -10)]
+    )
 
-utl.annotate_axis(
-    ax1, ['%.3f' % p for p in ps_cov],
-    ys_cov, xs_cov, offsets=[
-        (-5, -10),
-        (-5, 3),
-        (-5, 3),
-    ]
-)
+    utl.annotate_axis(
+        ax, ['%.3f' % p for p in ps_cov],
+        ys_cov, xs_cov, offsets=[(-5, -10), (-5, 3), (-5, 3)]
+    )
 
-ax1.set_ylabel('Minimum termini cleavage')
-ax1.set_xlabel('Maximum inner epitope cleavage')
-ax1.set_title('(a) Best parameters for different thresholds')
-ax1.legend()
+    ax.set_ylabel('Minimum termini cleavage')
+    ax.set_xlabel('Maximum inner epitope cleavage')
+    ax.set_title('(a) Best parameters for different thresholds')
+    ax.legend()
 
-mm = utl.plot_prefix_2(
-    'res-comb-nc-', 
-    xlabel='Minimum termini cleavage',
-    ylabel='Maximum inner epitope cleavage',
-    title='(b) Immunogenicity for each parameter setting',
-    #swapxy=True,
-    ax=ax2,
-    imshow_kwargs={'cmap': 'viridis', 'vmin': 0.4, 'vmax': 1.3}
-)
-ax2.grid(False)
-fig.colorbar(mm, ax=ax2)
 
-fig.savefig('dev/parameters.pdf')
+def plot_gridsearch(fig ,ax):
+    mm = utl.plot_prefix_2(
+        'res-comb-nc-',
+        xlabel='Minimum termini cleavage',
+        ylabel='Maximum inner epitope cleavage',
+        title='(b) Immunogenicity for each parameter setting',
+        #swapxy=True,
+        ax=ax,
+        imshow_kwargs={'cmap': 'viridis', 'vmin': 0.4, 'vmax': 1.3}
+    )
+    ax.grid(False)
+    fig.colorbar(mm, ax=ax)
 
-# %%
-_, proteins, _ = utl.read_epitope_data()
 
-# %%
-all_prots = set()
-for p in proteins.values():
-    all_prots.update(p)
-len(all_prots)
+def plot_eig_by_settings(fig, axes):
+    baselines = df.baseline.unique().tolist()
+    termini_cleavage = sorted(set(df[df.experiment == 'res-comb-nc-'].param_1))
+    vmin, vmax = min(termini_cleavage), max(termini_cleavage)
+    cmap = plt.get_cmap('viridis')
+    colors = [cmap.colors[int(200 * (b - vmin) / (vmax - vmin))] for b in termini_cleavage]
 
-# %%
-690/len(proteins)
+    df[(
+        df.experiment == 'res-comb-nc-'
+    ) & (
+        df.baseline != 1000
+    )].groupby([
+        'baseline', 'experiment', 'param_1', 'param_2', 'param_3', 'param_4'
+    ]).apply(
+        utl.summarize_experiment
+    ).reset_index().groupby([
+        'baseline', 'experiment', 'param_1',
+    ]).apply(lambda g: axes[
+            bb.index(g.baseline[0])
+        ].plot(
+            g.param_2, g.mean_eig,
+            c=colors[termini_cleavage.index(g.param_1[0])],
+            label=f'tc: {g.param_1[0]:.1f}'
+        ))
 
-# %%
-yy[int(0.05 * len(proteins))]
+    for i, ax in enumerate(axes):
+        if i == 1:
+            ax.set_title(f'(c) Effective immunogenicity breakdown')
 
-# %%
-yy = list(sorted((len(p) / len(all_prots) for p in proteins.values()), reverse=True))
-fig = plt.figure()
-ax = fig.subplots()
-ax.semilogx(range(len(yy)), yy, '.')
-ax.set_xlabel('Epitope rank')
-ax.set_ylabel('Pathogens covered')
-ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
-ax.set_yticklabels(['0%', '20%', '40%', '60%', '80%', '100%'])
-ax.set_ylim(-0.1, 1.05)
+        ax.annotate(
+            f'pc: {bb[i] / 1000:.3f}',
+            xy=(0, 0.95), xytext=(0, 0),
+            textcoords='offset points',
+            ha='center',
+            va='top'
+        )
+        ax.set_ylim(0, 1.0)
+        ax.set_xticks([-1, -0.5, 0, 0.5, 1])
+        ax.set_yticks([0, 0.3, 0.6, 0.9])
+
+        if i < 6:
+            ax.set_xticklabels([])
+        else:
+            ax.set_xticklabels(['', '-0.5', '', '0.5', ''])
+
+        if i not in [0, 3, 6]:
+            ax.set_yticklabels([])
+
+        if i == 7:
+            ax.set_xlabel('Inner epitope cleavage')
+        if i == 3:
+            ax.set_ylabel('Effective immunogenicity')
+
+
+fig = plt.figure(figsize=(18, 5), dpi=300)
+
+gs0 = mpl.gridspec.GridSpec(1, 3, figure=fig)
+gs00 = mpl.gridspec.GridSpecFromSubplotSpec(3, 3, subplot_spec=gs0[2])
+
+ax1 = fig.add_subplot(gs0[0])
+ax2 = fig.add_subplot(gs0[1])
+axes = [
+    fig.add_subplot(gs00[i, j])
+    for i in range(3) for j in range(3)
+]
+
+plot_parameter_evolution(ax1)
+plot_gridsearch(fig, ax2)
+plot_eig_by_settings(fig, axes)
+
 fig.tight_layout()
+fig.savefig('dev/parameters.pdf')
 
 # %% [markdown]
 # # vaccine sequences
