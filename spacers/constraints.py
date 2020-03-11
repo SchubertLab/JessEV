@@ -233,7 +233,7 @@ class DualImplementationConstraints(VaccineConstraint, ABC):
 
     def insert_constraint(self, params, model, solver):
         if self._instance is None:
-            if params_min_spacer_length == params.max_spacer_length:
+            if params.min_spacer_length == params.max_spacer_length:
                 self._instance = self._get_fixed_spacer_length_constraints()
                 typ = 'fixed'
             else:
