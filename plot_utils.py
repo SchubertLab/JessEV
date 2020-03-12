@@ -15,6 +15,16 @@ from scipy.stats import pearsonr, spearmanr
 from scipy import stats
 
 
+def set_font_size(font_size):
+    plt.rc('font', size=font_size)          # controls default text sizes
+    plt.rc('axes', titlesize=font_size)     # fontsize of the axes title
+    plt.rc('axes', labelsize=font_size)     # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=font_size)    # fontsize of the tick labels
+    plt.rc('ytick', labelsize=font_size)    # fontsize of the tick labels
+    plt.rc('legend', fontsize=font_size)    # legend fontsize
+    plt.rc('figure', titlesize=font_size)   # fontsize of the figure title
+
+
 def read_results(fname):
     '''
     reads a single result file with the design of a vaccine
@@ -427,7 +437,8 @@ def plot_vaccine(fname, hline=None, gray_first=(0,-1), ylim=(-2.1, 2.1),
         if style == 'bar':
             for ss, se in spacers:
                 if ss <= i < se:
-                    t.set_backgroundcolor(bgc)
+                    t.set_color('C2')
+                    t.set_fontweight('bold')
                 elif se + gray_first[0] <= i <= se + gray_first[1]:
                     t.set_backgroundcolor('#dddddd')
 
@@ -436,6 +447,8 @@ def plot_vaccine(fname, hline=None, gray_first=(0,-1), ylim=(-2.1, 2.1),
     ax.set_title('Immunogenicity: %.3f' % float(log['immunogen']))
     ax.set_ylim(ylim)
     ax.set_xlim(-0.5, len(log['vaccine']) - 0.5)
+    ax.grid(False, axis='x')
+    ax.set_yticks([-1.5, 0., 1.5])
 
     # monte carlo cleavage simulations
     for _ in range(100):
@@ -559,7 +572,7 @@ def plot_vaccine_interact_style(fname, hline=None, gray_first=(0,-1), ylim=(-2.1
 
 
 def plot_prefix_2(prefix, xlabel, ylabel, title, ax=None, xgrid=None,
-                  ygrid=None, imshow_kwargs=None, swapxy=False):
+                  ygrid=None, imshow_kwargs=None, swapxy=False, key='immunogen'):
     '''
     plots the results of an experiment with two parameters as a heatmap
     '''
@@ -576,7 +589,7 @@ def plot_prefix_2(prefix, xlabel, ylabel, title, ax=None, xgrid=None,
     mat = -1 * np.ones((len(all_xs), len(all_ys)))
     for i, x in enumerate(all_xs):
         for j, y in enumerate(all_ys):
-            mat[i, j] = float(log.get((x, y), {}).get('immunogen', np.nan))
+            mat[i, j] = float(log.get((x, y), {}).get(key, np.nan))
 
     if swapxy:
         all_xs, all_ys = all_ys, all_xs
@@ -618,7 +631,7 @@ def plot_by_baseline(ax, data, col_name, xlabel=None, ylabel=None,
         data.baseline / 1000,
         mean,
         yerr=(errors_lo, errors_hi), # comparison[mask]['std_' + values],
-        fmt='o-',
+        fmt='.-',
         capsize=4,
         label=experiment_names.get(experiment, experiment),
     )
@@ -655,13 +668,160 @@ def find_parameter_trace(comparison):
     return xs, ys, ps
 
 
-def annotate_axis(ax, notes, xs, ys, offsets):
+def annotate_axis(ax, notes, xs, ys, alignments, offset_base=4):
     for i in range(len(notes)):
+        va, ha = alignments[i].split()
+        offset = (
+            -offset_base if ha == 'right' else offset_base if ha == 'left' else 0,
+            offset_base if va == 'bottom' else -offset_base if va == 'top' else 0,
+        )
+        
         ax.annotate(
             notes[i],
             xy=(xs[i], ys[i]),
-            xytext=offsets[i],
-            textcoords="offset points",
-            ha='right',
-            va='bottom'
+            xytext=offset,
+            textcoords='offset points',
+            ha=ha, va=va
         )
+
+
+def plot_parameter_evolution(comparison, comp_cov, ax):
+    xgrid = [1.4, 1.74, 1.8, 1.95, 2.25, 2.5, 2.75]
+    epigrid = [-1, -0.5, -0.2, -0.1, 0.0, 0.1, 0.2, 0.5, 1.0]
+
+    xs_eig, ys_eig, ps_eig = find_parameter_trace(
+        comparison[comparison.experiment == 'res-comb-nc-']
+    )
+
+    xs_cov, ys_cov, ps_cov = find_parameter_trace(
+        comp_cov[comp_cov.experiment == 'res-cov-']
+    )
+
+    ax.plot(ys_eig, xs_eig, 'o-', label='Eff. imm.')
+    ax.plot(ys_cov, xs_cov, 'o-', label='Eff. cov.')
+    
+    annotate_axis(
+        ax, ['%.3f' % p for p in ps_eig],
+        ys_eig, xs_eig, alignments=[
+            'center left', 'center right', 'center right',
+            'top left', 'center left'
+        ]
+    )
+
+    annotate_axis(
+        ax, ['%.3f' % p for p in ps_cov],
+        ys_cov, xs_cov, alignments=[
+            'top center', 'bottom center', 'bottom center'
+        ]
+    )
+
+    ax.set_ylabel('Minimum termini cleavage')
+    ax.set_xlabel('Maximum inner epitope cleavage')
+    ax.set_title('(a)')
+    ax.legend(loc='upper left')
+    ax.set_xticks([-1, -0.5, 0., 0.5, 1., 1.5, 2.])
+
+
+def plot_gridsearch(fig ,ax):
+    mm = plot_prefix_2(
+        'res-comb-nc-',
+        xlabel='Minimum termini cleavage',
+        ylabel='Maximum inner epitope cleavage',
+        title='(b)',
+        #swapxy=True,
+        ax=ax,
+        imshow_kwargs={'cmap': 'viridis', 'vmin': 0.4, 'vmax': 1.3}
+    )
+    ax.grid(False)
+    fig.colorbar(mm, ax=ax)
+
+
+def plot_eig_by_settings(df, fig, axes):
+    baselines = sorted(df.baseline.unique().tolist())
+    termini_cleavage = sorted(set(df[df.experiment == 'res-comb-nc-'].param_1))
+    vmin, vmax = min(termini_cleavage), max(termini_cleavage)
+    cmap = plt.get_cmap('viridis')
+    colors = [cmap.colors[int(200 * (b - vmin) / (vmax - vmin))] for b in termini_cleavage]
+
+    def app(g):
+        base = g.baseline.values[0]
+        param1 = g.param_1.values[0]
+        axidx = baselines.index(base)
+        if axidx >= len(axes):
+            return
+        
+        axes[axidx].plot(
+            g.param_2, g.mean_eig,
+            c=colors[termini_cleavage.index(param1)],
+            label=f'tc: {param1:.1f}'
+        )
+    
+    groups = df[(
+        df.experiment == 'res-comb-nc-'
+    )].groupby([
+        'baseline', 'experiment', 'param_1', 'param_2', 'param_3', 'param_4'
+    ]).apply(
+        summarize_experiment
+    ).reset_index().groupby([
+        'baseline', 'experiment', 'param_1',
+    ]).apply(lambda g: app(g))
+
+    for i, (ax) in enumerate(axes):
+        if i == 1:
+            ax.set_title(f'(c)')
+
+        ax.annotate(
+            'pc: ' + f'{baselines[i] / 1000:.3f}'[1:],
+            xy=(0, 0.95), xytext=(0, 0),
+            textcoords='offset points',
+            ha='center',
+            va='top'
+        )
+        ax.set_ylim(0, 1.0)
+        ax.set_xticks([-1, -0.5, 0, 0.5, 1])
+        ax.set_yticks([0, 0.3, 0.6, 0.9])
+
+        if i < 6:
+            ax.set_xticklabels([])
+        else:
+            ax.set_xticklabels(['', '-0.5', '', '0.5', ''])
+
+        if i not in [0, 3, 6]:
+            ax.set_yticklabels([])
+
+        if i == 7:
+            ax.set_xlabel('Inner epitope cleavage')
+        if i == 3:
+            ax.set_ylabel('Effective immunogenicity')
+
+            
+def plot_ranked_parameters(df, summaries, column, ax, xlim, xticks, ylabel):
+    cmap = plt.get_cmap('plasma')
+    baselines = sorted(df.baseline.unique())
+    vmin, vmax = 0, len(baselines)
+    cmap2 = plt.get_cmap('tab20c')
+
+    colors = [4, 4, 4, 12, 12, 12, 12, 20, 20, 20]
+    for i, (baseline, group) in enumerate(summaries.groupby('baseline')):
+        ax.loglog(
+            range(1, len(group) + 1),
+            group[column].sort_values(ascending=False) / group[column].max(),
+            #c=cmap(int(255 * ((baselines.index(baseline)) - vmin) / (vmax - vmin))),
+            #c=cmap2(4 + 4 * (i // 3)),
+            c=cmap2(colors[i] - 4),
+            #label=f'pc: {baseline / 1000:.3f}',
+        )
+
+    ax.grid(True, axis='x', which='minor')
+    ax.legend([
+         mpl.patches.Patch(color=cmap2(i - 4)) for i in sorted(set(colors))
+    ], ['0<=pc<0.1', '0.1<=pc<0.5', '0.5<=pc<=1'], loc='lower left', ncol=1)
+    ax.set_xlabel('Parameters rank')
+    ax.set_ylabel(ylabel)
+    ax.set_ylim(0.45, 1.04)
+    ax.xaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+    ax.yaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
+    ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+    ax.set_xlim(xlim)
+    ax.set_xticks(xticks)
+    ax.grid(True, axis='y', which='minor')
