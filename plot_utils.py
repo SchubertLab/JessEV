@@ -1,18 +1,18 @@
-from collections import Counter
 import csv
 import os
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+from collections import Counter, defaultdict
+
 import matplotlib as mpl
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib import gridspec
+from scipy import stats
 from scipy.cluster import hierarchy
 from scipy.spatial.distance import pdist
-from collections import defaultdict
-from matplotlib import gridspec
 from scipy.stats import pearsonr, spearmanr
-from scipy import stats
 
 
 def set_font_size(font_size):
@@ -45,12 +45,13 @@ def read_log(prefix):
         if not fname.startswith(prefix) or not fname.endswith('.csv'):
             continue
 
-        # problem: I was dumb and used '-' as separator, not considering that some numbers
-        # could be negative, so that now we have to parse things such as res--0.1-0.5.csv
-        # whith parts -0.1 and 0.5
-        # so what we do here is to replace '-' with '_', except for '--' that becomes '_-'
-        # the previous example becomes res_-0.1_0.5.csv
-        parts_name = fname.replace('--', '$%#').replace('-','_').replace('$%#', '_-')
+        # problem: I was dumb and used '-' as separator, not considering that some
+        # numbers could be negative, so that now we have to parse things such as
+        # res--0.1-0.5.csv whith parts -0.1 and 0.5
+        # so what we do here is to replace '-' with '_', except for '--' that
+        # becomes '_-', so that the whole example becomes res_-0.1_0.5.csv and
+        # split on '_'
+        parts_name = fname.replace('--', '$%#').replace('-', '_').replace('$%#', '_-')
         parts = tuple(map(float, parts_name[len(prefix):-len('.csv')].split('_')))
         log[parts] = read_results('./dev/' + fname)
     return log
@@ -364,7 +365,7 @@ def rgba2rgb(rgb_fore, rgb_back, alpha):
     return '#%02x%02x%02x' % (rr, gr, br)
 
 
-def plot_vaccine(fname, hline=None, gray_first=(0,-1), ylim=(-2.1, 2.1),
+def plot_vaccine(fname, hline=None, gray_first=(0, -1), ylim=(-2.1, 2.1),
                  savefig=False, style='bar', ax=None):
     '''
     plots a vaccine
@@ -429,9 +430,9 @@ def plot_vaccine(fname, hline=None, gray_first=(0,-1), ylim=(-2.1, 2.1),
     ax.set_xticks(range(len(log['vaccine'])))
     ax.set_xticklabels(list(log['vaccine']))
     for i, t in enumerate(ax.get_xticklabels()):
-#         if cleavages[i] > 0:
-#             t.set_color('red')
-#             t.set_fontweight('bold')
+        #         if cleavages[i] > 0:
+        #             t.set_color('red')
+        #             t.set_fontweight('bold')
 
         # highlight spacers x ticks
         if style == 'bar':
@@ -471,7 +472,7 @@ def plot_vaccine(fname, hline=None, gray_first=(0,-1), ylim=(-2.1, 2.1),
             fig.savefig(fname.replace('.csv', '.png'))
 
 
-def plot_vaccine_interact_style(fname, hline=None, gray_first=(0,-1), ylim=(-2.1, 2.1),
+def plot_vaccine_interact_style(fname, hline=None, gray_first=(0, -1), ylim=(-2.1, 2.1),
                                 savefig=False, style='bar', ax=None):
     '''
     plots a vaccine to be used in the presentation for <interact>
@@ -518,15 +519,15 @@ def plot_vaccine_interact_style(fname, hline=None, gray_first=(0,-1), ylim=(-2.1
     ax.set_xticks(range(len(log['vaccine'])))
     ax.set_xticklabels(list(log['vaccine']))
     for i, t in enumerate(ax.get_xticklabels()):
-#         if cleavages[i] > 0:
-#             t.set_color('red')
-#             t.set_fontweight('bold')
+        #         if cleavages[i] > 0:
+        #             t.set_color('red')
+        #             t.set_fontweight('bold')
 
         # highlight spacers x ticks
         if style == 'bar':
             for ss, se in spacers:
                 if ss <= i < se:
-                    #t.set_backgroundcolor(bgc)
+                    # t.set_backgroundcolor(bgc)
                     t.set_fontweight('bold')
                 elif se + gray_first[0] <= i <= se + gray_first[1]:
                     t.set_backgroundcolor('#dddddd')
@@ -559,7 +560,7 @@ def plot_vaccine_interact_style(fname, hline=None, gray_first=(0,-1), ylim=(-2.1
     ax.bar(range(len(cuts)), [c / 100 for c in cuts], color=[
         [epi_color, spacer_color, '#dddddd'][c] for c in cols
     ])
-    
+
     ax.legend([
         mpl.patches.Patch(facecolor=epi_color),
         mpl.patches.Patch(facecolor=spacer_color),
@@ -630,7 +631,7 @@ def plot_by_baseline(ax, data, col_name, xlabel=None, ylabel=None,
     ax.errorbar(
         data.baseline / 1000,
         mean,
-        yerr=(errors_lo, errors_hi), # comparison[mask]['std_' + values],
+        yerr=(errors_lo, errors_hi),  # comparison[mask]['std_' + values],
         fmt='.-',
         capsize=4,
         label=experiment_names.get(experiment, experiment),
@@ -675,7 +676,7 @@ def annotate_axis(ax, notes, xs, ys, alignments, offset_base=4):
             -offset_base if ha == 'right' else offset_base if ha == 'left' else 0,
             offset_base if va == 'bottom' else -offset_base if va == 'top' else 0,
         )
-        
+
         ax.annotate(
             notes[i],
             xy=(xs[i], ys[i]),
@@ -697,40 +698,40 @@ def plot_parameter_evolution(comparison, comp_cov, ax):
         comp_cov[comp_cov.experiment == 'res-cov-']
     )
 
-    ax.plot(ys_eig, xs_eig, 'o-', label='Eff. imm.')
-    ax.plot(ys_cov, xs_cov, 'o-', label='Eff. cov.')
-    
+    ax.plot(xs_eig, ys_eig, 'o--', label='Eff. imm.')
+    ax.plot(xs_cov, ys_cov, 'o--', label='Eff. cov.')
+
     annotate_axis(
         ax, ['%.3f' % p for p in ps_eig],
-        ys_eig, xs_eig, alignments=[
-            'center left', 'center right', 'center right',
-            'top left', 'center left'
+        xs_eig, ys_eig, alignments=[
+            'bottom right', 'bottom right', 'top left',
+            'bottom right', 'top left'
         ]
     )
 
     annotate_axis(
         ax, ['%.3f' % p for p in ps_cov],
-        ys_cov, xs_cov, alignments=[
-            'top center', 'bottom center', 'bottom center'
-        ]
+        xs_cov, ys_cov, alignments=[
+            'bottom right', 'bottom left', 'bottom right'
+        ], offset_base=3
     )
 
-    ax.set_ylabel('Minimum termini cleavage')
-    ax.set_xlabel('Maximum inner epitope cleavage')
-    ax.set_title('(a)')
-    ax.legend(loc='upper left')
-    ax.set_xticks([-1, -0.5, 0., 0.5, 1., 1.5, 2.])
+    ax.set_xlabel('Min. termini cleavage $\\nu=\\gamma$')
+    ax.set_ylabel('Max. epitope cleavage $\\eta$')
+    ax.set_title('(c)')
+    ax.legend(loc='lower right')
+    ax.set_ylim(-1.5, 2.5)
 
 
-def plot_gridsearch(fig ,ax):
+def plot_gridsearch(fig, ax, ):
     mm = plot_prefix_2(
         'res-comb-nc-',
-        xlabel='Minimum termini cleavage',
-        ylabel='Maximum inner epitope cleavage',
-        title='(b)',
-        #swapxy=True,
+        xlabel='Min. termini cleavage $\\nu=\\gamma$',
+        ylabel='Max. epitope cleavage $\\eta$',
+        title='(d)',
+        # swapxy=True,
         ax=ax,
-        imshow_kwargs={'cmap': 'viridis', 'vmin': 0.4, 'vmax': 1.3}
+        imshow_kwargs={'cmap': 'viridis', 'vmin': 0.4, 'vmax': 1.4}
     )
     ax.grid(False)
     fig.colorbar(mm, ax=ax)
@@ -749,13 +750,13 @@ def plot_eig_by_settings(df, fig, axes):
         axidx = baselines.index(base)
         if axidx >= len(axes):
             return
-        
+
         axes[axidx].plot(
             g.param_2, g.mean_eig,
             c=colors[termini_cleavage.index(param1)],
             label=f'tc: {param1:.1f}'
         )
-    
+
     groups = df[(
         df.experiment == 'res-comb-nc-'
     )].groupby([
@@ -767,34 +768,33 @@ def plot_eig_by_settings(df, fig, axes):
     ]).apply(lambda g: app(g))
 
     for i, (ax) in enumerate(axes):
-        if i == 1:
-            ax.set_title(f'(c)')
+        if i == 0:
+            ax.set_title('(b)', x=1.05)
 
         ax.annotate(
-            'pc: ' + f'{baselines[i] / 1000:.3f}'[1:],
-            xy=(0, 0.95), xytext=(0, 0),
+            f'$p_c={baselines[i] / 1000:.3f}$',
+            xy=(0, 0.9), xytext=(0, 0),
             textcoords='offset points',
-            ha='center',
-            va='top'
+            ha='center', va='top',
         )
         ax.set_ylim(0, 1.0)
         ax.set_xticks([-1, -0.5, 0, 0.5, 1])
         ax.set_yticks([0, 0.3, 0.6, 0.9])
 
-        if i < 6:
+        if i < 8:
             ax.set_xticklabels([])
         else:
             ax.set_xticklabels(['', '-0.5', '', '0.5', ''])
 
-        if i not in [0, 3, 6]:
+        if i not in range(0, 10, 2):
             ax.set_yticklabels([])
 
-        if i == 7:
-            ax.set_xlabel('Inner epitope cleavage')
-        if i == 3:
+        if i == 8:
+            ax.set_xlabel('Min. Epitope cleavage $\\eta$', x=1)
+        if i == 4:
             ax.set_ylabel('Effective immunogenicity')
 
-            
+
 def plot_ranked_parameters(df, summaries, column, ax, xlim, xticks, ylabel):
     cmap = plt.get_cmap('plasma')
     baselines = sorted(df.baseline.unique())
@@ -803,25 +803,163 @@ def plot_ranked_parameters(df, summaries, column, ax, xlim, xticks, ylabel):
 
     colors = [4, 4, 4, 12, 12, 12, 12, 20, 20, 20]
     for i, (baseline, group) in enumerate(summaries.groupby('baseline')):
+        if baseline < 100:
+            label, color = '$p_c<0.1$', 'C0'
+        elif baseline < 500:
+            label, color = '$0.1\\leq p_c < 0.5$', 'C1',
+        else:
+            label, color = '$p_c \\geq 0.5$', 'C2'
+
         ax.loglog(
             range(1, len(group) + 1),
             group[column].sort_values(ascending=False) / group[column].max(),
-            #c=cmap(int(255 * ((baselines.index(baseline)) - vmin) / (vmax - vmin))),
-            #c=cmap2(4 + 4 * (i // 3)),
-            c=cmap2(colors[i] - 4),
-            #label=f'pc: {baseline / 1000:.3f}',
+            label=label, c=color
         )
 
     ax.grid(True, axis='x', which='minor')
-    ax.legend([
-         mpl.patches.Patch(color=cmap2(i - 4)) for i in sorted(set(colors))
-    ], ['0<=pc<0.1', '0.1<=pc<0.5', '0.5<=pc<=1'], loc='lower left', ncol=1)
+    legend_without_duplicate_labels(ax, loc='lower left')
     ax.set_xlabel('Parameters rank')
     ax.set_ylabel(ylabel)
     ax.set_ylim(0.45, 1.04)
-    ax.xaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
-    ax.yaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
-    ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
     ax.set_xlim(xlim)
     ax.set_xticks(xticks)
     ax.grid(True, axis='y', which='minor')
+    ax.set_title('(a)')
+    ax.xaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+    ax.yaxis.set_minor_formatter(mpl.ticker.FormatStrFormatter('%.1f'))
+    ax.yaxis.set_major_formatter(mpl.ticker.FormatStrFormatter('%.1f'))
+
+
+def get_cleavages_by_location(res):
+    epitopes_pos, spacers_pos = recover_epitopes_spacers_positions(res)
+    terminals = [s for s, _ in spacers_pos] + [s for s, _ in epitopes_pos if s > 0]
+    inner_epis = [i for s, e in epitopes_pos for i in range(s + 4, e)]
+    inner_spacers = [i for s, e in spacers_pos for i in range(s + 1, e)]
+    cleavages = list(map(float, res['cleavage'].split(';')))
+
+    return {
+        'terminals': [cleavages[i] for i in terminals],
+        'epitopes': [cleavages[i] for i in inner_epis],
+        'spacers': [cleavages[i] for i in inner_spacers],
+    }
+
+
+def read_single_bootstrap(method, index, netchop_cleavages):
+    if method == 'sequential':
+        res = read_results(f'dev/res-sequential-set-{index}.csv')
+        ncl = netchop_cleavages[f'seq{index}']
+    else:
+        res = read_results(f'dev/res-boostrap-ours-set-{index}-0.csv')
+        ncl = netchop_cleavages[f'sim{index}']
+
+    assert ncl['sequence'] == res['vaccine']
+    epitopes_pos, spacers_pos = recover_epitopes_spacers_positions(res)
+    terminals = [s for s, _ in spacers_pos] + [s for s, _ in epitopes_pos if s > 0]
+    inner_epis = [i for s, e in epitopes_pos for i in range(s + 4, e)]
+    inner_spacers = [i for s, e in spacers_pos for i in range(s + 1, e)]
+    scores = list(map(float, res['cleavage'].split(';')))
+
+    res.update({
+        'method': method,
+        'netchop_terminals': sum([ncl['cleavages'][i] for i in terminals]),
+        'netchop_epitopes': sum([ncl['cleavages'][i] for i in inner_epis]),
+        'netchop_spacers': sum([ncl['cleavages'][i] for i in inner_spacers]),
+        'scores_terminals': [scores[i] for i in terminals],
+        'scores_epitopes': [scores[i] for i in inner_epis],
+        'scores_spacers': [scores[i] for i in inner_spacers],
+    })
+    return res
+
+
+def read_bootstraps(netchop_method):
+    netchop_cleavages = read_netchop_results(netchop_method)
+    data = []
+    for i in range(1, 31):
+        data.append(read_single_bootstrap('sequential', i, netchop_cleavages))
+        try:
+            data.append(read_single_bootstrap('simultaneous', i, netchop_cleavages))
+        except:
+            pass
+    return data
+
+
+def plot_cleavages_by_location(ax, data):
+    scores_by_method_and_location = defaultdict(lambda: defaultdict(list))
+    for d in data:
+        for k in ['terminals', 'epitopes', 'spacers']:
+            scores_by_method_and_location[d['method']][k].extend(d[f'scores_{k}'])
+
+    for i, (method, values) in enumerate(scores_by_method_and_location.items()):
+        for j, (location, values) in enumerate(values.items()):
+            bpd = ax.boxplot(values, positions=[4 * i + j],
+                             widths=0.75, showfliers=False)
+            for k, v in bpd.items():
+                for e in v:
+                    e.set_color(f'C{i}')
+            # ax.scatter(
+            #    np.random.normal(4 * i + j, 0.05, len(values)),
+            #    values, marker='.', c=f'C{i}'
+            # )
+
+    ax.set_xticks([0, 1, 2, 3, 4, 5, 6])
+    #ax.set_xticklabels(['Terminals', 'Epitopes', 'Spacers', ''] * 2, rotation=360 - 45)
+    ax.set_xticklabels(['T', 'E', 'S', ''] * 2)
+    ax.legend([
+        mpl.patches.Patch(color='C0'),
+        mpl.patches.Patch(color='C1')
+    ], ['Sim.', 'Seq.'])
+
+
+def legend_without_duplicate_labels(ax, **kwargs):
+    # https://stackoverflow.com/a/56253636/521776
+    handles, labels = ax.get_legend_handles_labels()
+    unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
+    ax.legend(*zip(*unique), **kwargs)
+
+
+def plot_netchop(ax, data):
+    for i, key in enumerate(['terminals', 'epitopes', 'spacers']):
+        base = 3 * i
+
+        counts_by_method = defaultdict(list)
+        for d in data:
+            counts_by_method[d['method']].append(d[f'netchop_{key}'])
+
+        for j, v in enumerate(counts_by_method.values()):
+            bpd = ax.boxplot(v, positions=[base + j], widths=0.5, showfliers=False)
+            for v in bpd.values():
+                for e in v:
+                    e.set_color(f'C{j}')
+
+    ax.set_xticks([0.5, 2, 3.5, 5, 6.5])
+    ax.set_xticklabels(['Terminals', '', 'Epitopes', '', 'Spacers'])
+    ax.legend([
+        mpl.patches.Patch(color='C0'),
+        mpl.patches.Patch(color='C1')
+    ], [k.capitalize()[:3] + '.' for k in counts_by_method.keys()])
+
+
+def read_netchop_results(method):
+    with open(f'dev/res-boostrap-netchop-{method}-all.log') as f:
+        netchop_cleavages = {}
+        while True:
+            try:
+                row = next(f)
+            except StopIteration:
+                break
+
+            if not row.startswith('-----'):
+                continue
+
+            _, name = next(f).strip().split()
+            sequence, cleavages = '', []
+            row = next(f)
+            while not row.startswith('-----'):
+                seq = row.strip()
+                cle = [r == 'S' for r in next(f).strip()]
+                sequence = sequence + seq
+                cleavages.extend(cle)
+                row = next(f)
+
+            netchop_cleavages[name] = {'cleavages': cleavages, 'sequence': sequence}
+    return netchop_cleavages

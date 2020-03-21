@@ -26,6 +26,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from collections import defaultdict, Counter
 import matplotlib as mpl
 import pandas as pd
 import seaborn as sns
@@ -33,8 +34,8 @@ import plot_utils as utl
 
 # use LaTeX fonts in the plot
 # https://ercanozturk.org/2017/12/16/python-matplotlib-plots-in-latex/
-#plt.rc('text', usetex=True)
-#plt.rc('font', family='serif')
+plt.rc('text', usetex=True)
+plt.rc('font', family='serif')
 
 # %%
 #\usepackage{layouts}
@@ -46,6 +47,7 @@ OABdpi = 350
 
 # %%
 sns.set(context='paper', style='whitegrid')
+plt.rc('grid', linewidth=0.3)
 
 # %%
 df_fname = './dev/experiments-monte-carlo.csv.gz'
@@ -103,13 +105,14 @@ poi_alle = utl.compute_probability_of_improvement(
 
 # %%
 experiment_replacement = {
-    'res-comb-nc-': 'Ours',
-    'res-cov-': 'Ours',
+    'res-comb-nc-': 'Sim.',
+    'res-cov-': 'Sim.',
     'sequential': 'Seq.',
     'sequential-cov': 'Seq.',
 }
 
 utl.set_font_size(6)
+
 fig = plt.figure(figsize=(OABtextwidth, OABtextwidth / 2), dpi=OABdpi)
 ((ax1, ax2, ax5), (ax3, ax4, ax6)) = fig.subplots(2, 3)
 
@@ -139,11 +142,11 @@ utl.plot_many_by_baseline(
     experiment_names=experiment_replacement
 )
 
-ax5.semilogx(poi_cov.index, poi_cov['ge'], 'C0.-', 
+ax5.semilogx(poi_cov.index, 1 - poi_cov['ge'], 'C0.-', 
              label='Effective pathogen coverage')
-ax5.semilogx(poi.index, poi['ge'], 'C1.-',
+ax5.semilogx(poi.index, 1 - poi['ge'], 'C1.-',
              label='Effective immunogenicity')
-ax5.semilogx(poi_alle.index, poi_alle['ge'], 'C2.-',
+ax5.semilogx(poi_alle.index, 1 - poi_alle['ge'], 'C2.-',
              label='Effective allele coverage')
 
 ax6.loglog(improv.index, improv['res-comb-nc-'] / improv['sequential'], 'C0.-',
@@ -153,16 +156,15 @@ ax6.loglog(improv_cov.index, improv_cov['res-cov-'] / improv_cov['sequential-cov
 ax6.loglog(improv_alle.index, improv_alle['res-cov-'] / improv_alle['sequential-cov'],
            'C2.-', label='Effective allele coverage')
 
-ax5.set_ylim(-0.05, 1.05)
+ax5.set_ylim(-0.05, 0.55)
 ax6.set_ylim(0.8, 1.2e3)
-
 ax5.set_xlim(0.02, 1.1)
 ax6.set_xlim(0.02, 1.1)
 
-ax5.set_title('(c) Probability of no-reduction')
+ax5.set_title('(c) Worsening probability')
 ax6.set_title('(f) Expected improvement')
 
-ax6.set_xlabel('Prior cleavage probability')
+ax6.set_xlabel('Prior cleavage probability $p_c$')
 
 ax6.grid(True, axis='y', which='minor')
 
@@ -171,7 +173,7 @@ ax1.legend(loc='upper left')
 ax2.legend(loc='upper left')
 ax3.legend(loc='upper right')
 ax4.legend(loc='upper right')
-ax5.legend(loc='lower left')
+ax5.legend(loc='upper left')
 ax6.legend(loc='upper left')
 
 for ax in [ax1, ax2, ax3, ax4, ax5, ax6]:
@@ -195,30 +197,6 @@ summaries = df[
 ).reset_index()
 
 # %%
-utl.set_font_size(6)
-fig = plt.figure(figsize=(OABtextwidth, OABtextwidth / 3), dpi=OABdpi)
-
-root_gs = mpl.gridspec.GridSpec(1, 2, figure=fig, width_ratios=[2, 1])
-
-left_gs = mpl.gridspec.GridSpecFromSubplotSpec(
-    1, 2, subplot_spec=root_gs[0], wspace=0.3
-)
-
-right_gs = mpl.gridspec.GridSpecFromSubplotSpec(
-    3, 3, subplot_spec=root_gs[1], wspace=0.1, hspace=0.1
-)
-
-utl.plot_parameter_evolution(comparison, comp_cov, fig.add_subplot(left_gs[0]))
-utl.plot_gridsearch(fig, fig.add_subplot(left_gs[1]))
-utl.plot_eig_by_settings(df, fig, [
-    fig.add_subplot(right_gs[i, j])
-    for i in range(3) for j in range(3)
-])
-
-fig.tight_layout()
-fig.savefig('dev/parameters.pdf')
-
-# %%
 summ_cov = df[
     df.experiment == 'res-cov-'
 ].groupby([
@@ -228,53 +206,35 @@ summ_cov = df[
 ).reset_index()
 
 # %%
-sorted(df.baseline.unique())
-
-# %%
 utl.set_font_size(6)
 fig = plt.figure(figsize=(OABtextwidth, OABtextwidth / 2), dpi=OABdpi)
 
-root_gs = mpl.gridspec.GridSpec(1, 2, figure=fig, width_ratios=[2, 1])
+root_gs = mpl.gridspec.GridSpec(1, 2, figure=fig, width_ratios=[3, 1])
 
 left_gs = mpl.gridspec.GridSpecFromSubplotSpec(
-    2, 2, subplot_spec=root_gs[0], wspace=0.4, hspace=0.5
+    2, 1, subplot_spec=root_gs[0], hspace=0.35
+)
+
+botleft_gs = mpl.gridspec.GridSpecFromSubplotSpec(
+    1, 2, subplot_spec=left_gs[1], wspace=0.35, hspace=0.35
 )
 
 right_gs = mpl.gridspec.GridSpecFromSubplotSpec(
-    5, 2, subplot_spec=root_gs[1], wspace=0.075, hspace=0.075
+    5, 2, subplot_spec=root_gs[1], wspace=0.075, hspace=0.125
 )
 
 utl.plot_ranked_parameters(
-    df, summaries, 'mean_eig', fig.add_subplot(left_gs[0, 0]),
-    xlim=(0.9, 25), xticks=[1, 2, 3, 4, 5, 10, 20], ylabel='Relative eff. immunog.'
+    df, summaries, 'mean_eig', fig.add_subplot(left_gs[0]),
+    xlim=(0.9, 50), xticks=[1, 2, 3, 4, 5, 10, 20, 30, 40], ylabel='Relative eff. immunog.'
 )
-utl.plot_ranked_parameters(
-    df, summ_cov, 'mean_prot', fig.add_subplot(left_gs[0, 1]),
-    xlim=(0.9, 7), xticks=[1, 2, 3, 4, 5, 6], ylabel='Relative pathogen coverage'
-)
-utl.plot_parameter_evolution(comparison, comp_cov, fig.add_subplot(left_gs[1, 0]))
-utl.plot_gridsearch(fig, fig.add_subplot(left_gs[1, 1]))
+utl.plot_parameter_evolution(comparison, comp_cov, fig.add_subplot(botleft_gs[0]))
+utl.plot_gridsearch(fig, fig.add_subplot(botleft_gs[1]))
 utl.plot_eig_by_settings(df, fig, [
     fig.add_subplot(right_gs[i, j])
     for i in range(5) for j in range(2)
 ])
-
 fig.tight_layout()
-
-# %%
-smm = df[df.experiment == 'res-cov-'].groupby(['baseline', 'param_1', 'param_2', 'param_3', 'param_4']).apply(utl.summarize_experiment).reset_index()
-smm.head()
-
-# %%
-cmap2 = plt.get_cmap('tab20c')
-    
-for i, (b, g) in enumerate(smm[(smm.param_1==1.95) & (smm.param_2 == 1)].groupby('param_4')):
-    plt.semilogx(g.baseline, g.mean_prot, label=str(b), c=cmap2(2 - i))
-    
-for i, (b, g) in enumerate(smm[(smm.param_1==1.95) & (smm.param_2 == 1.5)].groupby('param_4')):
-    plt.semilogx(g.baseline, g.mean_prot, label=str(b), c=cmap2(7 - i))
-    
-plt.legend()
+fig.savefig('dev/parameters.pdf')
 
 # %% [markdown]
 # # vaccine sequences
@@ -314,6 +274,42 @@ seq_eig = np.mean(list(utl.effective_immunogen(seq_log)))
 our_log = utl.read_results(our_fname)
 our_eig = np.mean(list(utl.effective_immunogen(our_log)))
 
+data = utl.read_bootstraps('cterm')
+
+# %%
+utl.set_font_size(5)
+
+fig = plt.figure(figsize=(OABtextwidth, OABtextwidth * 37 / 100), dpi=OABdpi)
+
+root_gs = mpl.gridspec.GridSpec(
+    2, 2, figure=fig, width_ratios=[3, 1]
+)
+
+p1 = fig.add_subplot(root_gs[0, 0])
+p4 = fig.add_subplot(root_gs[1, 0])
+ax1 = fig.add_subplot(root_gs[0, 1])
+ax2 = fig.add_subplot(root_gs[1, 1])
+
+utl.plot_vaccine('dev/sequential-full.csv', ylim=(-2.5, 2.5), ax=p1)
+utl.plot_vaccine('dev/showoff.csv', ylim=(-2.5, 2.5), ax=p4)
+
+p1.set_title(f'(a) Sequential - Immunogenicity: {float(seq_log["immunogen"]):.3f} (Effective: {seq_eig:.3f})')
+p4.set_title(f'(b) Simultaneous - Immunogenicity: {float(our_log["immunogen"]):.3f} (Effective: {our_eig:.3f})')
+p1.set_xlabel(None)
+
+utl.plot_cleavages_by_location(ax1, data)
+ax1.set_title('(c) Cleavage score by location')
+
+utl.plot_netchop(ax2, data)
+ax2.set_title('(d) Cleavage sites by location')
+
+fig.tight_layout()
+fig.savefig('dev/vaccine-and-cleavages.pdf')
+
+# %% [markdown]
+# ## analysis
+
+# %%
 print(f'Sequential design - Immunogenicity: {float(seq_log["immunogen"]):.3f} (Effective: {seq_eig:.3f})')
 print(f'Our solution - Immunogenicity: {float(our_log["immunogen"]):.3f} (Effective: {our_eig:.3f})')
 
@@ -321,21 +317,95 @@ print(pd.Series(list(utl.sample_recovery(seq_log))).describe())
 print(pd.Series(list(utl.sample_recovery(our_log))).describe())
 
 # %%
-utl.set_font_size(6)
-
-fig = plt.figure(figsize=(OABtextwidth, OABtextwidth / 3), dpi=OABdpi)
-p1, p4 = fig.subplots(2, 1, gridspec_kw={
-    'hspace': 0.9,
-    'left': 0.08, 'right': 0.99, 'top': 0.925, 'bottom': 0.15
+df = pd.DataFrame.from_dict({
+    'terminals': [d['netchop_terminals'] for d in data],
+    'epitopes': [d['netchop_epitopes'] for d in data],
+    'spacers': [d['netchop_spacers'] for d in data],
+    'method': [d['method'] for d in data],
 })
+df.groupby('method').apply(lambda g: g.describe().T)
 
-utl.plot_vaccine('dev/sequential-full.csv', ylim=(-2.5, 2.5), ax=p1)
-utl.plot_vaccine('dev/showoff.csv', ylim=(-2.5, 2.5), ax=p4)
+# %%
+print('effect size for terminals')
+print('\t', (
+    df[df.method == 'simultaneous'].terminals.mean() 
+    - df[df.method == 'sequential'].terminals.mean()
+) / df[df.method == 'simultaneous'].terminals.std())
 
-p1.set_title(f'(a) Sequential design - Immunogenicity: {float(seq_log["immunogen"]):.3f} (Effective: {seq_eig:.3f})')
-p4.set_title(f'(b) Our solution - Immunogenicity: {float(our_log["immunogen"]):.3f} (Effective: {our_eig:.3f})')
-p1.set_xlabel(None)
+print('effect size for epitopes')
+print('\t', (
+    df[df.method == 'simultaneous'].epitopes.mean() 
+    - df[df.method == 'sequential'].epitopes.mean()
+) / df[df.method == 'simultaneous'].epitopes.std())
 
-fig.savefig('./dev/comparison.pdf')
+print('effect size for spacers')
+print('\t', (
+    df[df.method == 'simultaneous'].spacers.mean() 
+    - df[df.method == 'sequential'].spacers.mean()
+) / df[df.method == 'simultaneous'].spacers.std())
+
+# %%
+from statsmodels.discrete.discrete_model import Poisson
+from statsmodels.tools import add_constant
+
+# %%
+ddf = pd.get_dummies(df)
+Poisson(
+    ddf.spacers.values,
+    add_constant(ddf.method_simultaneous)
+).fit().summary()
+
+# %%
+ddf = pd.get_dummies(df)
+Poisson(
+    ddf.epitopes.values,
+    add_constant(ddf.method_simultaneous)
+).fit().summary()
+
+# %%
+Poisson(
+    ddf.terminals.values,
+    add_constant(ddf.method_simultaneous)
+).fit().summary()
+
+# %%
+res_ours, res_seq = defaultdict(list), defaultdict(list)
+for d in data:
+    r = res_ours if d['method'] == 'simultaneous' else res_seq
+    
+    for k in ['terminals', 'epitopes', 'spacers']:
+        r[k].extend(d[f'scores_{k}'])
+
+# %%
+print('between design comparison - terminals')
+print('    difference at the terminals:', 
+      np.mean(res_ours['terminals']) - np.mean(res_seq['terminals']))
+print('    difference at the terminals in std.:', 
+      (np.mean(res_ours['terminals']) - np.mean(res_seq['terminals'])
+      ) / np.std(res_seq['terminals']))
+
+# %%
+print('between design comparison - epitopes')
+print('    difference in the epitopes:', 
+      np.mean(res_ours['epitopes']) - np.mean(res_seq['epitopes']))
+print('    difference in the epitopes in std.:', 
+      (np.mean(res_ours['epitopes']) - np.mean(res_seq['epitopes'])
+      ) / np.std(res_seq['epitopes']))
+
+# %%
+print('within design comparison - simultaneous design')
+print('    difference:', 
+      np.mean(res_ours['terminals']) - np.mean(res_ours['epitopes']))
+print('    difference in std.:', 
+      (np.mean(res_ours['terminals']) - np.mean(res_ours['epitopes'])
+      ) / np.std(res_ours['epitopes']))
+
+# %%
+print('within design comparison - simultaneous design')
+print('    difference:', 
+      np.mean(res_seq['terminals']) - np.mean(res_seq['epitopes']))
+print('    difference in std.:', 
+      (np.mean(res_ours['terminals']) - np.mean(res_seq['epitopes'])
+      ) / np.std(res_seq['epitopes']))
 
 # %%
