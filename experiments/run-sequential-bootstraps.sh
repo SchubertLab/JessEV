@@ -6,7 +6,7 @@ function run_if_new {
     basename="dev/res-sequential-set-$1"
     if [ ! -f "$basename.log" ]; then
         python run_sequential.py \
-            "dev/epitopes-5k-set$1.csv" \
+            "dev/epitopes-5k-set-$1.csv" \
             "dev/made-alleles.csv" \
             "dev/full-affinities.csv" \
             "$basename.csv" \
@@ -14,8 +14,4 @@ function run_if_new {
     fi
 }
 
-run_if_new 1
-run_if_new 2
-run_if_new 3
-run_if_new 4
-run_if_new 5
+for i in {1..30}; do run_if_new $i; done
