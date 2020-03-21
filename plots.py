@@ -25,6 +25,9 @@ import csv
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from statsmodels.discrete.discrete_model import Poisson
+from statsmodels.tools import add_constant
+import statsmodels.formula.api as smf
 import matplotlib.patches as mpatches
 from collections import defaultdict, Counter
 import matplotlib as mpl
@@ -316,6 +319,9 @@ print(f'Our solution - Immunogenicity: {float(our_log["immunogen"]):.3f} (Effect
 print(pd.Series(list(utl.sample_recovery(seq_log))).describe())
 print(pd.Series(list(utl.sample_recovery(our_log))).describe())
 
+# %% [markdown]
+# ### netchop results
+
 # %%
 df = pd.DataFrame.from_dict({
     'terminals': [d['netchop_terminals'] for d in data],
@@ -345,28 +351,27 @@ print('\t', (
 ) / df[df.method == 'simultaneous'].spacers.std())
 
 # %%
-from statsmodels.discrete.discrete_model import Poisson
-from statsmodels.tools import add_constant
-
-# %%
 ddf = pd.get_dummies(df)
-Poisson(
-    ddf.spacers.values,
-    add_constant(ddf.method_simultaneous)
-).fit().summary()
+def test_netchop_improvement(key):
+    res = Poisson(
+        ddf[key].values,
+        add_constant(ddf.method_simultaneous)
+    ).fit()
+    print(res.summary())
+    return res
+
 
 # %%
-ddf = pd.get_dummies(df)
-Poisson(
-    ddf.epitopes.values,
-    add_constant(ddf.method_simultaneous)
-).fit().summary()
+rr = test_netchop_improvement('spacers')
 
 # %%
-Poisson(
-    ddf.terminals.values,
-    add_constant(ddf.method_simultaneous)
-).fit().summary()
+rr = test_netchop_improvement('epitopes')
+
+# %%
+rr = test_netchop_improvement('terminals')
+
+# %% [markdown]
+# ### cleavage scores
 
 # %%
 res_ours, res_seq = defaultdict(list), defaultdict(list)
@@ -376,36 +381,37 @@ for d in data:
     for k in ['terminals', 'epitopes', 'spacers']:
         r[k].extend(d[f'scores_{k}'])
 
-# %%
-print('between design comparison - terminals')
-print('    difference at the terminals:', 
-      np.mean(res_ours['terminals']) - np.mean(res_seq['terminals']))
-print('    difference at the terminals in std.:', 
-      (np.mean(res_ours['terminals']) - np.mean(res_seq['terminals'])
-      ) / np.std(res_seq['terminals']))
 
 # %%
-print('between design comparison - epitopes')
-print('    difference in the epitopes:', 
-      np.mean(res_ours['epitopes']) - np.mean(res_seq['epitopes']))
-print('    difference in the epitopes in std.:', 
-      (np.mean(res_ours['epitopes']) - np.mean(res_seq['epitopes'])
-      ) / np.std(res_seq['epitopes']))
+def test_score_improvement(key):
+    df = pd.DataFrame.from_dict({
+        key: res_ours[key] + res_seq[key],
+        'simultaneous': np.concatenate([
+            np.ones(len(res_ours[key])),
+            np.zeros(len(res_seq[key]))
+        ])
+    })
+    
+    print(df.groupby('simultaneous').apply(lambda g: g[key].describe().T))
+    print('effect size: ', (
+        df[df.simultaneous == 1][key].mean() - df[df.simultaneous == 0][key].mean()
+    ) / df[df.simultaneous == 0][key].std())
+    
+    res = smf.ols(
+        f'{key} ~ 1 + simultaneous', data=df
+    ).fit()
+    print(res.summary())
+    print('exact pvalues', res.pvalues)
+    return res
+
 
 # %%
-print('within design comparison - simultaneous design')
-print('    difference:', 
-      np.mean(res_ours['terminals']) - np.mean(res_ours['epitopes']))
-print('    difference in std.:', 
-      (np.mean(res_ours['terminals']) - np.mean(res_ours['epitopes'])
-      ) / np.std(res_ours['epitopes']))
+rr = test_score_improvement('epitopes')
 
 # %%
-print('within design comparison - simultaneous design')
-print('    difference:', 
-      np.mean(res_seq['terminals']) - np.mean(res_seq['epitopes']))
-print('    difference in std.:', 
-      (np.mean(res_ours['terminals']) - np.mean(res_seq['epitopes'])
-      ) / np.std(res_seq['epitopes']))
+rr = test_score_improvement('terminals')
+
+# %%
+rr = test_score_improvement('spacers')
 
 # %%
