@@ -35,11 +35,6 @@ import pandas as pd
 import seaborn as sns
 import plot_utils as utl
 
-# use LaTeX fonts in the plot
-# https://ercanozturk.org/2017/12/16/python-matplotlib-plots-in-latex/
-plt.rc('text', usetex=True)
-plt.rc('font', family='serif')
-
 # %%
 #\usepackage{layouts}
 #\printinunitsof{in}\prntlen{\textwidth} \prntlen{\linewidth} 
@@ -51,6 +46,12 @@ OABdpi = 350
 # %%
 sns.set(context='paper', style='whitegrid')
 plt.rc('grid', linewidth=0.3)
+sns.set_palette('colorblind')
+
+# use LaTeX fonts in the plot
+# https://ercanozturk.org/2017/12/16/python-matplotlib-plots-in-latex/
+plt.rc('text', usetex=True)
+plt.rc('font', family='serif')
 
 # %%
 df_fname = './dev/experiments-monte-carlo.csv.gz'
@@ -413,5 +414,3 @@ rr = test_score_improvement('terminals')
 
 # %%
 rr = test_score_improvement('spacers')
-
-# %%

@@ -883,33 +883,6 @@ def read_bootstraps(netchop_method):
     return data
 
 
-def plot_cleavages_by_location(ax, data):
-    scores_by_method_and_location = defaultdict(lambda: defaultdict(list))
-    for d in data:
-        for k in ['terminals', 'epitopes', 'spacers']:
-            scores_by_method_and_location[d['method']][k].extend(d[f'scores_{k}'])
-
-    for i, (method, values) in enumerate(scores_by_method_and_location.items()):
-        for j, (location, values) in enumerate(values.items()):
-            bpd = ax.boxplot(values, positions=[4 * i + j],
-                             widths=0.75, showfliers=False)
-            for k, v in bpd.items():
-                for e in v:
-                    e.set_color(f'C{i}')
-            # ax.scatter(
-            #    np.random.normal(4 * i + j, 0.05, len(values)),
-            #    values, marker='.', c=f'C{i}'
-            # )
-
-    ax.set_xticks([0, 1, 2, 3, 4, 5, 6])
-    #ax.set_xticklabels(['Terminals', 'Epitopes', 'Spacers', ''] * 2, rotation=360 - 45)
-    ax.set_xticklabels(['T', 'E', 'S', ''] * 2)
-    ax.legend([
-        mpl.patches.Patch(color='C0'),
-        mpl.patches.Patch(color='C1')
-    ], ['Sim.', 'Seq.'])
-
-
 def legend_without_duplicate_labels(ax, **kwargs):
     # https://stackoverflow.com/a/56253636/521776
     handles, labels = ax.get_legend_handles_labels()
@@ -938,6 +911,33 @@ def plot_netchop(ax, data):
         mpl.patches.Patch(color='C1')
     ], [k.capitalize()[:3] + '.' for k in counts_by_method.keys()])
 
+
+def plot_cleavages_by_location(ax, data):
+    scores_by_method_and_location = defaultdict(lambda: defaultdict(list))
+    for d in data:
+        for k in ['terminals', 'epitopes', 'spacers']:
+            scores_by_method_and_location[d['method']][k].extend(d[f'scores_{k}'])
+
+    for i, (method, values) in enumerate(scores_by_method_and_location.items()):
+        for j, (location, values) in enumerate(values.items()):
+            bpd = ax.boxplot(values, positions=[4 * i + j],
+                             widths=0.75, showfliers=False)
+            for k, v in bpd.items():
+                for e in v:
+                    e.set_color(f'C{i}')
+            # ax.scatter(
+            #    np.random.normal(4 * i + j, 0.05, len(values)),
+            #    values, marker='.', c=f'C{i}'
+            # )
+
+    ax.set_xticks([0, 1, 2, 3, 4, 5, 6])
+    #ax.set_xticklabels(['Terminals', 'Epitopes', 'Spacers', ''] * 2, rotation=360 - 45)
+    ax.set_xticklabels(['T', 'E', 'S', ''] * 2)
+    ax.legend([
+        mpl.patches.Patch(color='C0'),
+        mpl.patches.Patch(color='C1')
+    ], ['Sim.', 'Seq.'])
+    
 
 def read_netchop_results(method):
     with open(f'dev/res-boostrap-netchop-{method}-all.log') as f:
