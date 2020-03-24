@@ -830,18 +830,30 @@ def plot_ranked_parameters(df, summaries, column, ax, xlim, xticks, ylabel):
     ax.yaxis.set_major_formatter(mpl.ticker.FormatStrFormatter('%.1f'))
 
 
-def get_cleavages_by_location(res):
-    epitopes_pos, spacers_pos = recover_epitopes_spacers_positions(res)
-    terminals = [s for s, _ in spacers_pos] + [s for s, _ in epitopes_pos if s > 0]
-    inner_epis = [i for s, e in epitopes_pos for i in range(s + 4, e)]
-    inner_spacers = [i for s, e in spacers_pos for i in range(s + 1, e)]
-    cleavages = list(map(float, res['cleavage'].split(';')))
+def read_netchop_results(method):
+    with open(f'dev/res-boostrap-netchop-{method}-all.log') as f:
+        netchop_cleavages = {}
+        while True:
+            try:
+                row = next(f)
+            except StopIteration:
+                break
 
-    return {
-        'terminals': [cleavages[i] for i in terminals],
-        'epitopes': [cleavages[i] for i in inner_epis],
-        'spacers': [cleavages[i] for i in inner_spacers],
-    }
+            if not row.startswith('-----'):
+                continue
+
+            _, name = next(f).strip().split()
+            sequence, cleavages = '', []
+            row = next(f)
+            while not row.startswith('-----'):
+                seq = row.strip()
+                cle = [r == 'S' for r in next(f).strip()]
+                sequence = sequence + seq
+                cleavages.extend(cle)
+                row = next(f)
+
+            netchop_cleavages[name] = {'cleavages': cleavages, 'sequence': sequence}
+    return netchop_cleavages
 
 
 def read_single_bootstrap(method, index, netchop_cleavages):
@@ -867,6 +879,7 @@ def read_single_bootstrap(method, index, netchop_cleavages):
         'scores_terminals': [scores[i] for i in terminals],
         'scores_epitopes': [scores[i] for i in inner_epis],
         'scores_spacers': [scores[i] for i in inner_spacers],
+        'eff_ig': np.mean(list(effective_immunogen(res))),
     })
     return res
 
@@ -890,19 +903,49 @@ def legend_without_duplicate_labels(ax, **kwargs):
     ax.legend(*zip(*unique), **kwargs)
 
 
-def plot_netchop(ax, data):
-    for i, key in enumerate(['terminals', 'epitopes', 'spacers']):
+def plot_cleavages_by_location(ax, data, key, significance=None):
+    bots, tops = [], []
+    for i, loc in enumerate(['terminals', 'epitopes', 'spacers']):
         base = 3 * i
 
         counts_by_method = defaultdict(list)
         for d in data:
-            counts_by_method[d['method']].append(d[f'netchop_{key}'])
+            value = d[f'{key}_{loc}']
+            dest = counts_by_method[d['method']]
+            if isinstance(value, (list, tuple)):
+                dest.extend(value)
+            else:
+                dest.append(value)
 
         for j, v in enumerate(counts_by_method.values()):
             bpd = ax.boxplot(v, positions=[base + j], widths=0.5, showfliers=False)
+            tops.append(bpd['caps'][1].get_ydata()[0])
+            bots.append(bpd['caps'][0].get_ydata()[0])
             for v in bpd.values():
                 for e in v:
                     e.set_color(f'C{j}')
+
+    if significance:
+        max_top = max(tops) + 1
+        for i, s in enumerate(significance):
+            if s <= 0:
+                continue
+
+            ax.plot(
+                [3 * i, 3 * i, 3 * i + 1, 3 * i + 1],
+                [tops[2 * i] + 0.5, max_top, max_top, tops[2 * i + 1] + 0.5],
+                color='k', linewidth=0.6,
+            )
+            ax.annotate(
+                '*' * s,
+                xy=(3 * i + 0.5, max_top),
+                xytext=(0, 0),
+                textcoords='offset points',
+                ha='center', va='bottom',
+            )
+
+        b, t = min(bots), max(tops)
+        ax.set_ylim(b - (t - b) * 0.1, t + (t - b) * 0.1 + 2)
 
     ax.set_xticks([0.5, 2, 3.5, 5, 6.5])
     ax.set_xticklabels(['Terminals', '', 'Epitopes', '', 'Spacers'])
@@ -910,56 +953,3 @@ def plot_netchop(ax, data):
         mpl.patches.Patch(color='C0'),
         mpl.patches.Patch(color='C1')
     ], [k.capitalize()[:3] + '.' for k in counts_by_method.keys()])
-
-
-def plot_cleavages_by_location(ax, data):
-    scores_by_method_and_location = defaultdict(lambda: defaultdict(list))
-    for d in data:
-        for k in ['terminals', 'epitopes', 'spacers']:
-            scores_by_method_and_location[d['method']][k].extend(d[f'scores_{k}'])
-
-    for i, (method, values) in enumerate(scores_by_method_and_location.items()):
-        for j, (location, values) in enumerate(values.items()):
-            bpd = ax.boxplot(values, positions=[4 * i + j],
-                             widths=0.75, showfliers=False)
-            for k, v in bpd.items():
-                for e in v:
-                    e.set_color(f'C{i}')
-            # ax.scatter(
-            #    np.random.normal(4 * i + j, 0.05, len(values)),
-            #    values, marker='.', c=f'C{i}'
-            # )
-
-    ax.set_xticks([0, 1, 2, 3, 4, 5, 6])
-    #ax.set_xticklabels(['Terminals', 'Epitopes', 'Spacers', ''] * 2, rotation=360 - 45)
-    ax.set_xticklabels(['T', 'E', 'S', ''] * 2)
-    ax.legend([
-        mpl.patches.Patch(color='C0'),
-        mpl.patches.Patch(color='C1')
-    ], ['Sim.', 'Seq.'])
-    
-
-def read_netchop_results(method):
-    with open(f'dev/res-boostrap-netchop-{method}-all.log') as f:
-        netchop_cleavages = {}
-        while True:
-            try:
-                row = next(f)
-            except StopIteration:
-                break
-
-            if not row.startswith('-----'):
-                continue
-
-            _, name = next(f).strip().split()
-            sequence, cleavages = '', []
-            row = next(f)
-            while not row.startswith('-----'):
-                seq = row.strip()
-                cle = [r == 'S' for r in next(f).strip()]
-                sequence = sequence + seq
-                cleavages.extend(cle)
-                row = next(f)
-
-            netchop_cleavages[name] = {'cleavages': cleavages, 'sequence': sequence}
-    return netchop_cleavages

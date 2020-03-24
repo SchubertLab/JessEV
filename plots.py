@@ -42,6 +42,7 @@ import plot_utils as utl
 OABtextwidth = 6.7261 #in
 OABlinewidth = 3.2385 #in
 OABdpi = 350
+OABfigfmt = 'pdf'
 
 # %%
 sns.set(context='paper', style='whitegrid')
@@ -118,54 +119,54 @@ experiment_replacement = {
 utl.set_font_size(6)
 
 fig = plt.figure(figsize=(OABtextwidth, OABtextwidth / 2), dpi=OABdpi)
-((ax1, ax2, ax5), (ax3, ax4, ax6)) = fig.subplots(2, 3)
+((ax2, ax1, ax3), (ax4, ax5, ax6)) = fig.subplots(2, 3)
 
 utl.plot_many_by_baseline(
     ax1, comparison, [mask_us, mask_seq], 'rec',
-    title='(a) Recovered epitopes',
+    title='(b) Recovered epitopes',
     experiment_names=experiment_replacement
 )
 
 utl.plot_many_by_baseline(
     ax2, comparison, [mask_us, mask_seq], 'eig',
-    title='(b) Effective Immunogenicity',
+    title='(a) Effective Immunogenicity',
     experiment_names=experiment_replacement
 )
 
 utl.plot_many_by_baseline(
     ax3, comp_cov, [mask_comp_us, mask_comp_seq], 'prot',
     xlabel='Prior cleavage probability',
-    title='(d) Pathogen Coverage',
+    title='(c) Pathogen Coverage',
     experiment_names=experiment_replacement
 )
 
 utl.plot_many_by_baseline(
     ax4, comp_cov, [mask_comp_us, mask_comp_seq], 'alle',
     xlabel='Prior cleavage probability',
-    title='(e) HLA Coverage',
+    title='(d) HLA Coverage',
     experiment_names=experiment_replacement
 )
 
 ax5.semilogx(poi_cov.index, 1 - poi_cov['ge'], 'C0.-', 
-             label='Effective pathogen coverage')
+             label='Eff. pathogen coverage')
 ax5.semilogx(poi.index, 1 - poi['ge'], 'C1.-',
-             label='Effective immunogenicity')
+             label='Eff. immunogenicity')
 ax5.semilogx(poi_alle.index, 1 - poi_alle['ge'], 'C2.-',
-             label='Effective allele coverage')
+             label='Eff. allele coverage')
 
 ax6.loglog(improv.index, improv['res-comb-nc-'] / improv['sequential'], 'C0.-',
-           label='Effective pathogen coverage')
+           label='Eff. pathogen coverage')
 ax6.loglog(improv_cov.index, improv_cov['res-cov-'] / improv_cov['sequential-cov'],
-           'C1.-', label='Effective immunogenicity')
+           'C1.-', label='Eff. immunogenicity')
 ax6.loglog(improv_alle.index, improv_alle['res-cov-'] / improv_alle['sequential-cov'],
-           'C2.-', label='Effective allele coverage')
+           'C2.-', label='Eff. allele coverage')
 
 ax5.set_ylim(-0.05, 0.55)
 ax6.set_ylim(0.8, 1.2e3)
 ax5.set_xlim(0.02, 1.1)
 ax6.set_xlim(0.02, 1.1)
 
-ax5.set_title('(c) Worsening probability')
+ax5.set_title('(e) Worsening probability')
 ax6.set_title('(f) Expected improvement')
 
 ax6.set_xlabel('Prior cleavage probability $p_c$')
@@ -186,7 +187,7 @@ for ax in [ax1, ax2, ax3, ax4, ax5, ax6]:
     ax.set_xticklabels(['0.02', '0.1', '0.4', '1.0'])
 
 fig.tight_layout()
-fig.savefig('dev/comparison_all_together.pdf')
+fig.savefig(f'dev/fig3.{OABfigfmt}', bbox_inches='tight')
 
 # %% [markdown]
 # # study of parameters
@@ -238,7 +239,7 @@ utl.plot_eig_by_settings(df, fig, [
     for i in range(5) for j in range(2)
 ])
 fig.tight_layout()
-fig.savefig('dev/parameters.pdf')
+fig.savefig(f'dev/fig4.{OABfigfmt}', bbox_inches='tight')
 
 # %% [markdown]
 # # vaccine sequences
@@ -286,29 +287,36 @@ utl.set_font_size(5)
 fig = plt.figure(figsize=(OABtextwidth, OABtextwidth * 37 / 100), dpi=OABdpi)
 
 root_gs = mpl.gridspec.GridSpec(
-    2, 2, figure=fig, width_ratios=[3, 1]
+    2, 2, figure=fig, width_ratios=[1, 3.5]
 )
 
-p1 = fig.add_subplot(root_gs[0, 0])
-p4 = fig.add_subplot(root_gs[1, 0])
-ax1 = fig.add_subplot(root_gs[0, 1])
-ax2 = fig.add_subplot(root_gs[1, 1])
+ax1 = fig.add_subplot(root_gs[0, 0])
+ax2 = fig.add_subplot(root_gs[1, 0])
+p4 = fig.add_subplot(root_gs[0, 1])
+p1 = fig.add_subplot(root_gs[1, 1])
 
 utl.plot_vaccine('dev/sequential-full.csv', ylim=(-2.5, 2.5), ax=p1)
 utl.plot_vaccine('dev/showoff.csv', ylim=(-2.5, 2.5), ax=p4)
 
-p1.set_title(f'(a) Sequential - Immunogenicity: {float(seq_log["immunogen"]):.3f} (Effective: {seq_eig:.3f})')
-p4.set_title(f'(b) Simultaneous - Immunogenicity: {float(our_log["immunogen"]):.3f} (Effective: {our_eig:.3f})')
+p1.set_title(f'(d) Sequential - Immunogenicity: {float(seq_log["immunogen"]):.3f} (Effective: {seq_eig:.3f})')
+p4.set_title(f'(c) Simultaneous - Immunogenicity: {float(our_log["immunogen"]):.3f} (Effective: {our_eig:.3f})')
 p1.set_xlabel(None)
+p1.tick_params(axis='y', rotation=90)
+p4.tick_params(axis='y', rotation=90)
 
-utl.plot_cleavages_by_location(ax1, data)
-ax1.set_title('(c) Cleavage score by location')
+# actual significance computed below
+utl.plot_cleavages_by_location(ax1, data, 'scores', significance=[3, 3, 3])
+ax1.set_title('(a) Cleavage score by location')
+ax1.set_ylabel('Score')
+ax1.tick_params(axis='y', rotation=90)
 
-utl.plot_netchop(ax2, data)
-ax2.set_title('(d) Cleavage sites by location')
+utl.plot_cleavages_by_location(ax2, data, 'netchop', significance=[3, 3, 0])
+ax2.set_title('(b) Cleavage sites by location')
+ax2.set_ylabel('Count')
+ax2.tick_params(axis='y', rotation=90)
 
 fig.tight_layout()
-fig.savefig('dev/vaccine-and-cleavages.pdf')
+fig.savefig(f'dev/fig2.{OABfigfmt}', bbox_inches='tight', format=OABfigfmt)
 
 # %% [markdown]
 # ## analysis
@@ -317,8 +325,24 @@ fig.savefig('dev/vaccine-and-cleavages.pdf')
 print(f'Sequential design - Immunogenicity: {float(seq_log["immunogen"]):.3f} (Effective: {seq_eig:.3f})')
 print(f'Our solution - Immunogenicity: {float(our_log["immunogen"]):.3f} (Effective: {our_eig:.3f})')
 
-print(pd.Series(list(utl.sample_recovery(seq_log))).describe())
-print(pd.Series(list(utl.sample_recovery(our_log))).describe())
+print('sequential recoveries', pd.Series(list(utl.sample_recovery(seq_log))).describe())
+print('simultaneous recoveries', pd.Series(list(utl.sample_recovery(our_log))).describe())
+
+# %%
+ssf_log = utl.read_results('dev/showoff_strict.csv')
+ssf_eig = np.mean(list(utl.effective_immunogen(ssf_log)))
+
+print('strict immunogen:', ssf_log['immunogen'])
+print('strict eff immunogen:', ssf_eig)
+
+# %%
+print('immunogenicity increase from strict to non strict:', 100 * (
+    float(our_log['immunogen']) - float(ssf_log['immunogen'])
+) / float(ssf_log['immunogen']))
+
+# %%
+print('effective immunogenicity increase from strict to non strict:',
+      100 * (our_eig - ssf_eig) / ssf_eig)
 
 # %% [markdown]
 # ### netchop results
@@ -370,6 +394,32 @@ rr = test_netchop_improvement('epitopes')
 
 # %%
 rr = test_netchop_improvement('terminals')
+
+# %% [markdown]
+# ### effective immunogenicity
+
+# %%
+eigdf = pd.DataFrame.from_dict({
+    'eig': [d['eff_ig'] for d in data],
+    'simultaneous': [int(d['method'] == 'simultaneous') for d in data],
+})
+
+print(eigdf.groupby('simultaneous').apply(lambda g: g.describe().T))
+
+mean_diff = (
+    eigdf[eigdf.simultaneous == 1].eig.mean() - 
+    eigdf[eigdf.simultaneous == 0].eig.mean()
+)
+print('increase in eff. imm.:', mean_diff)
+print('effect size of increase in eff. imm.:', 
+      mean_diff / eigdf[eigdf.simultaneous == 0].eig.std())
+
+# %%
+rr = smf.ols(
+    f'eig ~ 1 + simultaneous', data=eigdf
+).fit()
+print(rr.summary())
+print('exact p-values', rr.pvalues)
 
 # %% [markdown]
 # ### cleavage scores
