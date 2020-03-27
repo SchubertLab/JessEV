@@ -11,7 +11,7 @@ from spacers.pcm import DoennesKohlbacherPcm
 
 
 def design(epitope_data, min_spacer_length, max_spacer_length, num_epitopes,
-           constraints, objective, pcm=None):
+           constraints, objective, pcm=None, solver_type='gurobi'):
     epitopes = list(epitope_data.keys())
     immunogens = [epitope_data[e]['immunogen'] for e in epitopes]
 
@@ -28,13 +28,13 @@ def design(epitope_data, min_spacer_length, max_spacer_length, num_epitopes,
         params=params,
         vaccine_constraints=constraints,
         vaccine_objective=objective,
+        solver_type='gurobi',
     ).build_model()
 
     return problem.solve()
 
 
 @click.command()
-@click.argument('immunogenicity-computation', type=click.Choice(['effective', 'simple']))
 @click.argument('input-epitopes', type=click.Path())
 @click.argument('output-vaccine', type=click.Path())
 # vaccine properties
@@ -60,14 +60,10 @@ def design(epitope_data, min_spacer_length, max_spacer_length, num_epitopes,
 @click.option('--max-epitope-cleavage', '-E', help='Maximum cleavage inside epitopes', type=float)
 @click.option('--epitope-cleavage-ignore-first', '-i', type=int, default=1,
               help='Ignore first amino acids for epitope cleavage')
-# immunogenicity computation options
-@click.option('--monte-carlo-trials', '-mct', type=int, default=100,
-              help='Number of Monte-Carlo trials to estimate the immunogenicity')
-@click.option('--prior-cleavage-probability', '-cpp', type=float, default=0.1,
-              help='Prior cleavage probability to use in the Monte Carlo trials')
-# logging
+# misc
 @click.option('--log-file', type=click.Path(), help='Where to save the logs')
 @click.option('--verbose', is_flag=True, help='Print debug messages')
+@click.option('--solver-type', default='gurobi', help='Which linear programming solver to use')
 @click.pass_context
 def main(ctx=None, **kwargs):
     global LOGGER
@@ -75,14 +71,13 @@ def main(ctx=None, **kwargs):
     utilities.main_dispatcher(design_cli, LOGGER, ctx, kwargs)
 
 
-def design_cli(immunogenicity_computation, input_epitopes, output_vaccine,
-               max_spacer_length, min_spacer_length, num_epitopes, top_immunogen,
-               top_alleles, top_proteins, min_nterminus_gap, min_spacer_cleavage,
-               max_epitope_cleavage, min_nterminus_cleavage,
+def design_cli(input_epitopes, output_vaccine, max_spacer_length,
+               min_spacer_length, num_epitopes, top_immunogen, top_alleles,
+               top_proteins, min_nterminus_gap, min_spacer_cleavage,
+               max_epitope_cleavage, min_nterminus_cleavage, solver_type,
                epitope_cleavage_ignore_first, max_spacer_cleavage, min_alleles,
-               min_proteins, min_avg_prot_conservation, min_avg_alle_conservation,
-               min_cterminus_cleavage, monte_carlo_trials, prior_cleavage_probability,
-               **kwargs):
+               min_proteins, min_avg_prot_conservation,
+               min_avg_alle_conservation, min_cterminus_cleavage, **kwargs):
 
     epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
 
@@ -92,14 +87,7 @@ def design_cli(immunogenicity_computation, input_epitopes, output_vaccine,
     epitope_data = {e: epitope_data[e] for e in valid_epitopes}
     LOGGER.info(f'Loaded {len(epitope_data)} epitopes')
 
-    if immunogenicity_computation == 'simple':
-        objective = spob.SimpleImmunogenicityObjective()
-        LOGGER.info('Optimizing simple immunogenicity')
-    elif immunogenicity_computation == 'effective':
-        objective = spob.EffectiveImmunogenicityObjective(monte_carlo_trials, prior_cleavage_probability)
-        LOGGER.info('Optimizing effective immunogenicity')
-    else:
-        raise ValueError('unknown immunogenicity method: %s' % immunogenicity_computation)
+    objective = spob.SimpleImmunogenicityObjective()
 
     constraints = []
 
@@ -133,7 +121,7 @@ def design_cli(immunogenicity_computation, input_epitopes, output_vaccine,
 
     try:
         solution = design(epitope_data, min_spacer_length, max_spacer_length,
-                          num_epitopes, constraints, objective, pcm)
+                          num_epitopes, constraints, objective, pcm, solver_type)
     except SolverFailedException as exc:
         LOGGER.error('Could not solve the problem: %s', exc.condition)
         return False, str(exc.condition)
