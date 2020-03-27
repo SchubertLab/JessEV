@@ -8,10 +8,8 @@ import sys
 import traceback
 
 import pandas as pd
-import pyomo.environ as aml
 
-from Fred2.Core import Allele, Peptide
-from Fred2.EpitopePrediction import EpitopePredictionResult
+import pyomo.environ as aml
 
 
 def compute_allele_coverage(epitope_data):
@@ -145,33 +143,3 @@ def main_dispatcher(main_fn, logger, click_ctx, main_kwargs):
 def get_alleles_and_thresholds(allele_file):
     df = pd.read_csv(allele_file, index_col=['allele'])
     return df
-
-
-def affinities_from_csv(bindings_file, allele_data=None, peptide_coverage=None):
-    ''' Loads binding affinities from a csv file. Optionally, augments alleles with probability
-        and peptides with protein coverage. Discards all peptides for which coverage is not provided.
-    '''
-    df = pd.read_csv(bindings_file)
-
-    df['Seq'] = df.Seq.apply(Peptide)
-    if peptide_coverage is not None:
-        keep = []
-        for pep in df.Seq:
-            if pep not in peptide_coverage:
-                keep.append(False)
-                continue
-
-            keep.append(True)
-            for prot in peptide_coverage[str(pep)]:
-                pep.proteins[prot] = prot
-
-        df = df[keep]
-
-    df = df.set_index(['Seq', 'Method'])
-
-    if allele_data is not None:
-        df.columns = [Allele(c, allele_data[c]['frequency'] / 100) for c in df.columns]
-    else:
-        df.columns = [Allele(c) for c in df.columns]
-
-    return EpitopePredictionResult(df)

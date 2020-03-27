@@ -1,16 +1,48 @@
 import csv
 
 import click
+import pandas as pd
 
 from Fred2.CleavagePrediction.PSSM import PCM
 from Fred2.Core import Allele, Protein
 from Fred2.Core.Peptide import Peptide
 from Fred2.EpitopeAssembly import EpitopeAssembly, EpitopeAssemblyWithSpacer
+from Fred2.EpitopePrediction import EpitopePredictionResult
 from Fred2.EpitopePrediction.PSSM import BIMAS
 from Fred2.EpitopeSelection import OptiTope
 from spacers import pcm, utilities
 
 LOGGER = None
+
+
+def affinities_from_csv(bindings_file, allele_data=None, peptide_coverage=None):
+    ''' Loads binding affinities from a csv file. Optionally, augments alleles with probability
+        and peptides with protein coverage. Discards all peptides for which coverage is not provided.
+    '''
+    df = pd.read_csv(bindings_file)
+
+    df['Seq'] = df.Seq.apply(Peptide)
+    if peptide_coverage is not None:
+        keep = []
+        for pep in df.Seq:
+            if pep not in peptide_coverage:
+                keep.append(False)
+                continue
+
+            keep.append(True)
+            for prot in peptide_coverage[str(pep)]:
+                pep.proteins[prot] = prot
+
+        df = df[keep]
+
+    df = df.set_index(['Seq', 'Method'])
+
+    if allele_data is not None:
+        df.columns = [Allele(c, allele_data[c]['frequency'] / 100) for c in df.columns]
+    else:
+        df.columns = [Allele(c) for c in df.columns]
+
+    return EpitopePredictionResult(df)
 
 
 @click.command()
@@ -60,7 +92,7 @@ def run_sequential(input_epitopes, input_alleles, input_affinities,
     threshold = {allele.replace('HLA-', ''): data['threshold'] for allele, data in allele_data.items()}
     LOGGER.info('Loaded %d alleles', len(threshold))
 
-    affinities = utilities.affinities_from_csv(input_affinities, allele_data, peptide_coverage=peptide_coverage)
+    affinities = affinities_from_csv(input_affinities, allele_data, peptide_coverage=peptide_coverage)
     LOGGER.info('Loaded %d affinities', len(affinities))
 
     LOGGER.info('Selecting epitopes...')
