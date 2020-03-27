@@ -3,7 +3,6 @@ import random
 from abc import ABC, abstractmethod
 
 import pyomo.environ as aml
-
 from spacers.model import (ModelEditor, VaccineConstraint, VaccineObjective,
                            insert_conjunction_constraints,
                            insert_disjunction_constraints,

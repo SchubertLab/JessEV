@@ -10,7 +10,6 @@ import pyomo.environ as aml
 import pyomo.kernel as pmo
 from pyomo.opt import SolverFactory, TerminationCondition
 from pyomo.solvers.plugins.solvers.persistent_solver import PersistentSolver
-
 from spacers import utilities
 from spacers.pcm import DoennesKohlbacherPcm
 
