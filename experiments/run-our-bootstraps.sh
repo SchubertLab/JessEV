@@ -5,7 +5,7 @@ set -ex
 function run_if_new {
     basename="dev/res-boostrap-ours-set-$1-$2"
     if [ ! -f "$basename.log" ]; then
-        python design.py simple \
+        python design.py \
             "dev/epitopes-5k-set-$1.csv" \
             "$basename.csv" \
             --min-spacer-length 4 \

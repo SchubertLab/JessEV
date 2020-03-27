@@ -5,7 +5,7 @@ set -ex
 function run_if_new {
     basename="dev/res-cov-$term-$inn-$cov-$cons"
     if [ ! -f "$basename.log" ]; then
-        python design.py simple dev/made-epitopes.csv "$basename.csv" \
+        python design.py dev/made-epitopes.csv "$basename.csv" \
             --max-spacer-length 4 \
             --min-spacer-length 4 \
             --num-epitopes 15 \
@@ -24,7 +24,7 @@ for cons in 0.05 0.1 0.15 0.2
 do
     for cov in 0.99
     do
-        for term in 1.74 1.95 2.05
+        for term in 1.74 1.95 2.05 2.5
         do
             for inn in 2.0 1.5 1.0 0.0
             do
