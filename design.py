@@ -53,8 +53,8 @@ def design(epitope_data, min_spacer_length, max_spacer_length, num_epitopes,
               help='On average, epitopes in the vaccine must cover at least this many alleles')
 # cleavage constraints
 @click.option('--min-nterminus-gap', '-g', help='Minimum cleavage gap', type=float)
-@click.option('--min-nterminus-cleavage', '-n', help='Minimum cleavage at the n-terminus', type=float)
-@click.option('--min-cterminus-cleavage', '-ct', help='Minimum cleavage at the n-terminus', type=float)
+@click.option('--min-nterminus-cleavage', '-n', help='Minimum cleavage at the N-terminus', type=float)
+@click.option('--min-cterminus-cleavage', '-ct', help='Minimum cleavage at the C-terminus', type=float)
 @click.option('--min-spacer-cleavage', '-c', help='Minimum cleavage inside the spacers', type=float)
 @click.option('--max-spacer-cleavage', '-C', help='Maximum cleavage inside the spacers', type=float)
 @click.option('--max-epitope-cleavage', '-E', help='Maximum cleavage inside epitopes', type=float)
