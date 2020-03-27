@@ -3,8 +3,8 @@ import logging
 import multiprocessing as mp
 
 import click
-import pyomo.environ as aml
 
+import pyomo.environ as aml
 from spacers import constraints as spco
 from spacers import objectives as spob
 from spacers import utilities
