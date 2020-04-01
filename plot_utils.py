@@ -30,7 +30,9 @@ def read_results(fname):
     reads a single result file with the design of a vaccine
     '''
     with open(fname) as f:
-        return next(csv.DictReader(f))
+        res = next(csv.DictReader(f))
+        res['fname'] = fname
+        return res
 
 
 def read_log(prefix):
@@ -200,10 +202,10 @@ def process_results(fname, key, basepc, res, num_mc):
     '''
     seq = read_results(fname)
     for vals in process_log(seq, num_mc, basepc):
-        res.append((basepc, key, np.nan, np.nan, np.nan, np.nan) + vals)
+        res.append((basepc, key, fname, np.nan, np.nan, np.nan, np.nan) + vals)
 
 
-def compute_mc_experiments(baselines=None):
+def compute_mc_experiments(base_grid_names, base_fixed_names, baselines=None):
     '''
     reads the results of several experiments, runs Monte Carlo experiments for
     each of them and returns a data frame with the results.
@@ -218,19 +220,19 @@ def compute_mc_experiments(baselines=None):
 
     baselines = baselines or (list(np.arange(0, 1.01, 0.05)) + [0.025, 0.075])
     for basepc in baselines:
-        for base, parts in bases:
+        for base in base_grid_names:
             for k, v in read_log(base).items():
                 epitope_boundaries, _ = recover_epitopes_spacers_positions(v)
                 for vals in process_log(v, num_mc, basepc):
                     k = k + (np.nan,) * (4 - len(k))  # same length
-                    res.append((basepc, base,) + k + vals)
+                    res.append((basepc, base, v['fname'],) + k + vals)
 
-        process_results('./dev/sequential-full.csv', 'sequential', basepc, res, num_mc)
-        process_results('./dev/sequential-cov.csv', 'sequential-cov', basepc, res, num_mc)
+        for base in base_fixed_names:
+            process_results(f'./dev/{base}.csv' , base, basepc, res, num_mc)
 
     return pd.DataFrame(res, columns=[
-        'baseline', 'experiment', 'param_1', 'param_2', 'param_3', 'param_4',
-        'recovered', 'effective_immunogen', 'avg_len', 'immunogen',
+        'baseline', 'experiment', 'fname', 'param_1', 'param_2', 'param_3',
+        'param_4', 'recovered', 'effective_immunogen', 'avg_len', 'immunogen',
         'proteins', 'alleles', 'trial'
     ])
 
@@ -270,7 +272,7 @@ def compare_experiments(monte_carlo_df, column):
     for each experiment, finds the parameter settings that resulted in the largest metric
     '''
     return monte_carlo_df.groupby([
-        'baseline', 'experiment', 'param_1', 'param_2', 'param_3', 'param_4'
+        'baseline', 'experiment', 'fname', 'param_1', 'param_2', 'param_3', 'param_4'
     ]).apply(
         summarize_experiment
     ).reset_index().groupby([
@@ -301,7 +303,7 @@ def compute_probability_of_improvement(monte_carlo_df, comparison, column,
         })
 
     poi = monte_carlo_df.merge(comparison, on=[
-        'baseline', 'experiment', 'param_1', 'param_2', 'param_3', 'param_4'
+        'baseline', 'experiment', 'fname', 'param_1', 'param_2', 'param_3', 'param_4'
     ]).groupby(
         'baseline'
     ).apply(
@@ -698,22 +700,23 @@ def plot_parameter_evolution(comparison, comp_cov, ax):
         comp_cov[comp_cov.experiment == 'res-cov-']
     )
 
-    ax.plot(xs_eig, ys_eig, 'o--', label='Eff. imm.')
-    ax.plot(xs_cov, ys_cov, 'o--', label='Eff. cov.')
+    ax.plot(xs_eig, ys_eig, '.--', label='Eff. imm.')
+    ax.plot(xs_cov, ys_cov, '.--', label='Eff. cov.')
 
     annotate_axis(
         ax, ['%.3f' % p for p in ps_eig],
         xs_eig, ys_eig, alignments=[
-            'bottom right', 'bottom right', 'top left',
-            'bottom right', 'top left'
-        ]
+            'center right', 'bottom right', 'top left',
+            'bottom left', 'center left'
+        ], offset_base=4
     )
 
     annotate_axis(
         ax, ['%.3f' % p for p in ps_cov],
         xs_cov, ys_cov, alignments=[
-            'bottom right', 'bottom left', 'bottom right'
-        ], offset_base=3
+            'center right', 'center right',
+            'center left', 'center left'
+        ], offset_base=4
     )
 
     ax.set_xlabel('Min. termini cleavage $\\nu=\\gamma$')

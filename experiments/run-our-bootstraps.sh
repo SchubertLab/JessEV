@@ -1,6 +1,8 @@
 #!/bin/bash
 set -ex
 
+# this script runs our framework on the thirty bootstraps
+
 # parameters: epitopes_set_number max_epitope_cleavage
 function run_if_new {
     basename="dev/res-boostrap-ours-set-$1-$2"

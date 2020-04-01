@@ -61,6 +61,7 @@ def design(epitope_data, min_spacer_length, max_spacer_length, num_epitopes,
 @click.option('--epitope-cleavage-ignore-first', '-i', type=int, default=1,
               help='Ignore first amino acids for epitope cleavage')
 # misc
+@click.option('--fix-spacer', type=str, help='Only use this spacer')
 @click.option('--log-file', type=click.Path(), help='Where to save the logs')
 @click.option('--verbose', is_flag=True, help='Print debug messages')
 @click.option('--solver-type', default='gurobi', help='Which linear programming solver to use')
@@ -76,7 +77,7 @@ def design_cli(input_epitopes, output_vaccine, max_spacer_length,
                top_proteins, min_nterminus_gap, min_spacer_cleavage,
                max_epitope_cleavage, min_nterminus_cleavage, solver_type,
                epitope_cleavage_ignore_first, max_spacer_cleavage, min_alleles,
-               min_proteins, min_avg_prot_conservation,
+               min_proteins, min_avg_prot_conservation, fix_spacer,
                min_avg_alle_conservation, min_cterminus_cleavage, **kwargs):
 
     epitope_data = utilities.load_epitopes(input_epitopes, top_immunogen, top_alleles, top_proteins)
@@ -118,6 +119,8 @@ def design_cli(input_epitopes, output_vaccine, max_spacer_length,
         constraints.append(spco.MinimumCoverageAverageConservation(
             protein_coverage, min_proteins, min_avg_prot_conservation, name='Proteins'
         ))
+    if fix_spacer is not None:
+        constraints.append(spco.FixSolution(None, spacers=[fix_spacer] * (num_epitopes - 1)))
 
     try:
         solution = design(epitope_data, min_spacer_length, max_spacer_length,

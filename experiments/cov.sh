@@ -1,6 +1,9 @@
 #!/bin/bash
 set -ex
 
+# this script runs a grid search over cleavage, coverage and conservation.
+# the results are evaluated later to maximize the effective coverage
+
 # parameters: termini_cleavage epitope_cleavage coverage conservation
 function run_if_new {
     basename="dev/res-cov-$term-$inn-$cov-$cons"

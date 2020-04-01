@@ -1,4 +1,8 @@
+#!/bin/bash
 set -x
+
+# this script runs a grid search over cleavage at the terminals and inside the epitopes.
+# the results are evaluated later to maximize the effective immunogenicity
 
 ntc_grid="3.5 3.25 3 2.75 2.5 2.25 1.1 1.4 1.61 1.74 1.8 1.95"
 epi_grid="-1.0 -0.5 -0.2 -0.1 0.0 0.1 0.2 0.5 1.0"

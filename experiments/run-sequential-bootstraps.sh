@@ -1,6 +1,8 @@
 #!/bin/bash
 set -ex
 
+# this experiment runs the sequential approach on the thirty bootstraps
+
 # parameters: epitopes_set_number
 function run_if_new {
     basename="dev/res-sequential-set-$1"

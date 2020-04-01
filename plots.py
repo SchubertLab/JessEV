@@ -14,7 +14,7 @@
 # ---
 
 # %% [markdown]
-# # plots 
+# # plots
 
 # %%
 # %load_ext autoreload
@@ -23,24 +23,27 @@
 # %%
 import csv
 import os
-import numpy as np
-import matplotlib.pyplot as plt
-from statsmodels.discrete.discrete_model import Poisson
-from statsmodels.tools import add_constant
-import statsmodels.formula.api as smf
-import matplotlib.patches as mpatches
-from collections import defaultdict, Counter
+from collections import Counter, defaultdict
+import itertools
+
 import matplotlib as mpl
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
+import statsmodels.formula.api as smf
+from statsmodels.discrete.discrete_model import Poisson
+from statsmodels.tools import add_constant
+
 import plot_utils as utl
 
 # %%
-#\usepackage{layouts}
-#\printinunitsof{in}\prntlen{\textwidth} \prntlen{\linewidth} 
+# \usepackage{layouts}
+# \printinunitsof{in}\prntlen{\textwidth} \prntlen{\linewidth}
 
-OABtextwidth = 6.7261 #in
-OABlinewidth = 3.2385 #in
+OABtextwidth = 6.7261  # in
+OABlinewidth = 3.2385  # in
 OABdpi = 350
 OABfigfmt = 'pdf'
 
@@ -57,7 +60,12 @@ plt.rc('font', family='serif')
 # %%
 df_fname = './dev/experiments-monte-carlo.csv.gz'
 if not os.path.exists(df_fname):
-    df = utl.compute_mc_experiments(baselines=[
+    df = utl.compute_mc_experiments(base_grid_names=[
+        'res-cov-', 'res-comb-nc-', 'res-eig-'
+    ], base_fixed_names=[
+        'sequential', 'sequential-cov',
+        'res-fixed-spacer-aay', 'res-fixed-spacer-mwqw'
+    ],baselines=[
         0.025, 0.050, 0.075, 0.100, 0.150, 0.200, 0.300, 0.500, 0.650, 1.0
     ])
     # convert to int so we can reliaby filter on them
@@ -69,11 +77,14 @@ if not os.path.exists(df_fname):
 else:
     df = pd.read_csv(df_fname)
     print('Used existing Monte Carlo experiments')
-    
+
 df
 
 # %% [markdown]
 # # comparison
+
+# %%
+comparison = utl.compare_experiments(df, 'mean_eig')
 
 # %%
 # comparison on effective immunogenicity and protein converage
@@ -147,7 +158,7 @@ utl.plot_many_by_baseline(
     experiment_names=experiment_replacement
 )
 
-ax5.semilogx(poi_cov.index, 1 - poi_cov['ge'], 'C0.-', 
+ax5.semilogx(poi_cov.index, 1 - poi_cov['ge'], 'C0.-',
              label='Eff. pathogen coverage')
 ax5.semilogx(poi.index, 1 - poi['ge'], 'C1.-',
              label='Eff. immunogenicity')
@@ -188,6 +199,64 @@ for ax in [ax1, ax2, ax3, ax4, ax5, ax6]:
 
 fig.tight_layout()
 fig.savefig(f'dev/fig3.{OABfigfmt}', bbox_inches='tight')
+
+
+# %% [markdown]
+# # study of spacers
+
+# %%
+def find_spacers_by_experiment(comp, exp):
+    all_spacers = []
+    for i, row in comp[comp.experiment == exp].iterrows():
+        res = utl.read_results(row.fname)
+        _, spacers_positions = utl.recover_epitopes_spacers_positions(res)
+        spacers = [res['vaccine'][a:b] for a, b in spacers_positions]
+        all_spacers.extend(spacers)
+    return all_spacers
+
+all_spacers = find_spacers_by_experiment(comparison, 'res-comb-nc-')
+Counter(all_spacers).most_common()
+
+# %%
+from spacers import pcm
+pcmm = pcm.DoennesKohlbacherPcm()
+offset = np.zeros((4, 9))
+for i, a in enumerate('MWQW'):
+    offset[i, i:i+6] += pcmm.PCM_MATRIX[pcmm.get_index(a)]
+offset
+
+# %%
+offset.sum(axis=0)
+
+# %%
+offset = np.zeros((4, 9))
+for i, a in enumerate('MWRW'):
+    offset[i, i:i+6] += pcmm.PCM_MATRIX[pcmm.get_index(a)]
+offset
+
+# %%
+offset.sum(axis=0)
+
+# %%
+for aminos in itertools.product(range(20), range(20), range(20), range(20)):
+    contributions = [pcmm.PCM_MATRIX[a] for a in aminos]
+    cterm_score = sum(c[4 - i] for i, c in enumerate(contributions))
+    if cterm_score >= 2.32:
+        print(f'{cterm_score:.2f}', ''.join(pcmm.AMINOS[a] for a in aminos))
+
+# %%
+mwqw_ei = utl.compute_expected_improvement(
+    comparison, 'mean_eig', 'res-fixed-spacer-mwqw', 'res-comb-nc-'
+)
+
+(1 - mwqw_ei['res-fixed-spacer-mwqw'] / mwqw_ei['res-comb-nc-']).describe()
+
+# %%
+aay_ei = utl.compute_expected_improvement(
+    comparison, 'mean_eig', 'res-fixed-spacer-aay', 'res-comb-nc-'
+)
+
+(1 - aay_ei['res-fixed-spacer-aay'] / aay_ei['res-comb-nc-']).describe()
 
 # %% [markdown]
 # # study of parameters
@@ -251,7 +320,7 @@ fig.savefig(f'dev/fig4.{OABfigfmt}', bbox_inches='tight')
 utl.set_font_size(12)
 fig = plt.figure(figsize=(12, 3), dpi=300)
 ax = fig.subplots()
-utl.plot_vaccine_interact_style('dev/sequential-full.csv', ylim=(0, 1.1), ax=ax)
+utl.plot_vaccine_interact_style('dev/sequential.csv', ylim=(0, 1.1), ax=ax)
 ax.set_title('')
 sns.despine(fig, top=True, left=True, right=True)
 ax.grid(True, axis='y', zorder=0)
@@ -271,7 +340,7 @@ fig.savefig('./dev/interact_ours.pdf')
 # ## paper
 
 # %%
-seq_fname = 'dev/sequential-full.csv'
+seq_fname = 'dev/sequential.csv'
 our_fname = 'dev/showoff.csv'
 
 seq_log = utl.read_results(seq_fname)
@@ -295,7 +364,7 @@ ax2 = fig.add_subplot(root_gs[1, 0])
 p4 = fig.add_subplot(root_gs[0, 1])
 p1 = fig.add_subplot(root_gs[1, 1])
 
-utl.plot_vaccine('dev/sequential-full.csv', ylim=(-2.5, 2.5), ax=p1)
+utl.plot_vaccine('dev/sequential.csv', ylim=(-2.5, 2.5), ax=p1)
 utl.plot_vaccine('dev/showoff.csv', ylim=(-2.5, 2.5), ax=p4)
 
 p1.set_title(f'(d) Sequential - Immunogenicity: {float(seq_log["immunogen"]):.3f} (Effective: {seq_eig:.3f})')
@@ -359,24 +428,26 @@ df.groupby('method').apply(lambda g: g.describe().T)
 # %%
 print('effect size for terminals')
 print('\t', (
-    df[df.method == 'simultaneous'].terminals.mean() 
+    df[df.method == 'simultaneous'].terminals.mean()
     - df[df.method == 'sequential'].terminals.mean()
 ) / df[df.method == 'simultaneous'].terminals.std())
 
 print('effect size for epitopes')
 print('\t', (
-    df[df.method == 'simultaneous'].epitopes.mean() 
+    df[df.method == 'simultaneous'].epitopes.mean()
     - df[df.method == 'sequential'].epitopes.mean()
 ) / df[df.method == 'simultaneous'].epitopes.std())
 
 print('effect size for spacers')
 print('\t', (
-    df[df.method == 'simultaneous'].spacers.mean() 
+    df[df.method == 'simultaneous'].spacers.mean()
     - df[df.method == 'sequential'].spacers.mean()
 ) / df[df.method == 'simultaneous'].spacers.std())
 
 # %%
 ddf = pd.get_dummies(df)
+
+
 def test_netchop_improvement(key):
     res = Poisson(
         ddf[key].values,
@@ -407,16 +478,16 @@ eigdf = pd.DataFrame.from_dict({
 print(eigdf.groupby('simultaneous').apply(lambda g: g.describe().T))
 
 mean_diff = (
-    eigdf[eigdf.simultaneous == 1].eig.mean() - 
+    eigdf[eigdf.simultaneous == 1].eig.mean() -
     eigdf[eigdf.simultaneous == 0].eig.mean()
 )
 print('increase in eff. imm.:', mean_diff)
-print('effect size of increase in eff. imm.:', 
+print('effect size of increase in eff. imm.:',
       mean_diff / eigdf[eigdf.simultaneous == 0].eig.std())
 
 # %%
 rr = smf.ols(
-    f'eig ~ 1 + simultaneous', data=eigdf
+    f'eig ~ simultaneous', data=eigdf
 ).fit()
 print(rr.summary())
 print('exact p-values', rr.pvalues)
@@ -428,7 +499,7 @@ print('exact p-values', rr.pvalues)
 res_ours, res_seq = defaultdict(list), defaultdict(list)
 for d in data:
     r = res_ours if d['method'] == 'simultaneous' else res_seq
-    
+
     for k in ['terminals', 'epitopes', 'spacers']:
         r[k].extend(d[f'scores_{k}'])
 
@@ -442,12 +513,12 @@ def test_score_improvement(key):
             np.zeros(len(res_seq[key]))
         ])
     })
-    
+
     print(df.groupby('simultaneous').apply(lambda g: g[key].describe().T))
     print('effect size: ', (
         df[df.simultaneous == 1][key].mean() - df[df.simultaneous == 0][key].mean()
     ) / df[df.simultaneous == 0][key].std())
-    
+
     res = smf.ols(
         f'{key} ~ 1 + simultaneous', data=df
     ).fit()
@@ -464,3 +535,5 @@ rr = test_score_improvement('terminals')
 
 # %%
 rr = test_score_improvement('spacers')
+
+# %%
