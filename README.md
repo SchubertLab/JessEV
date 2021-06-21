@@ -79,3 +79,9 @@ The input epitopes must be in a CSV file with the following columns:
 The experiments performed in the paper can be run with the bash scripts in the `experiments` directory. The necessary input data is located in the `dev` directory, where results and log files will be placed. These results can be analyzed by running `plots.py`, which will create the paper's figures in the `dev` directory and print the results of the analyses mentioned in the paper.
 
 Note: the sequential approach requires [FRED-2](https://github.com/FRED-2/Fred2), which does not officially support python 3 yet. Unfortunately, some fiddling is required on your part.
+
+# Get in touch
+
+For inquiries, open an issue or send us both an email at:
+ - emilio.dorigatti at stat.uni-muenchen.de
+ - benjamin.schubert at helmholtz-muenchen.de
