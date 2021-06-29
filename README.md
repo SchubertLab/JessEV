@@ -80,6 +80,14 @@ The experiments performed in the paper can be run with the bash scripts in the `
 
 Note: the sequential approach requires [FRED-2](https://github.com/FRED-2/Fred2), which does not officially support python 3 yet. Unfortunately, some fiddling is required on your part.
 
+# Citation
+
+Emilio Dorigatti, Benjamin Schubert, Joint epitope selection and spacer design for string-of-beads vaccines, Bioinformatics, Volume 36, Issue Supplement_2, December 2020, Pages i643–i650, https://doi.org/10.1093/bioinformatics/btaa790
+
+# License
+
+Free for academic users. Others please contact us.
+
 # Get in touch
 
 For inquiries, open an issue or send us both an email at:
